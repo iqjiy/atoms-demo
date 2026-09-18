@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: atoms-demo
+    runtime: node
+    rootDir: app
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    plan: free
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
