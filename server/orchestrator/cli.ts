@@ -1,5 +1,5 @@
 import { Orchestrator } from './runner.js';
-import { FakeLlmClient } from '../llm/fakeClient.js';
+import { createLlmFromEnv } from '../llm/index.js';
 import { AutoApproveGate } from './approvalGate.js';
 import { Checkpointer } from './checkpointer.js';
 import { createInMemoryRepos } from '../db/repositories/memory.js';
@@ -17,8 +17,10 @@ async function main() {
   }
 
   const repos = createInMemoryRepos();
+  const llm = createLlmFromEnv();
+  console.log(`[llm] 使用 ${process.env.LLM_API_KEY ? 'DeepSeek(真实)' : 'Fake(确定性)'} 模型`);
   const orc = new Orchestrator({
-    llm: new FakeLlmClient(),
+    llm,
     gate: new AutoApproveGate(),
     checkpointer: new Checkpointer(repos),
     emit: (e: OrchestratorEvent) => {
