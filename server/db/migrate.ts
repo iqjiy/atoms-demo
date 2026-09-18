@@ -1,23 +1,13 @@
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { createNeonDb } from './client.js';
+import { SCHEMA_STATEMENTS } from './schema.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-/** 执行 schema.sql 建表。用法：DATABASE_URL=... npx tsx server/db/migrate.ts */
+/** 幂等建表（IF NOT EXISTS）。用法：DATABASE_URL=... npx tsx server/db/migrate.ts */
 export async function migrate(connectionString: string): Promise<void> {
   const db = createNeonDb(connectionString);
-  const ddl = readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
-  // neon serverless 的 prepared statement 不支持多语句，按分号拆成单条逐句执行
-  const statements = ddl
-    .split(';')
-    .map((s) => s.replace(/--[^\n]*/g, '').trim())
-    .filter((s) => s.length > 0);
-  for (const stmt of statements) {
+  for (const stmt of SCHEMA_STATEMENTS) {
     await db.query(stmt);
   }
-  console.log(`[migrate] schema applied (${statements.length} statements)`);
+  console.log(`[migrate] schema applied (${SCHEMA_STATEMENTS.length} statements)`);
 }
 
 // 直接运行时执行
