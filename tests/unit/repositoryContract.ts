@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
+import { randomUUID } from 'node:crypto';
 import type { Repos } from '../../server/db/repositories/types.js';
+
+/** 每次生成唯一 ownerId，避免真实库（共享、含残留数据）下测试相互污染。 */
+const owner = () => `owner-${randomUUID()}`;
 
 /**
  * Repository 契约测试：同一组断言驱动多个实现（内存 / Postgres），
@@ -9,25 +13,28 @@ export function repositoryContract(make: () => Repos): void {
   describe('ProjectRepository', () => {
     it('create 后可 getById 读回', async () => {
       const r = make();
-      const p = await r.projects.create({ ownerId: 'o1', title: 't', initialIdea: 'idea' });
+      const o = owner();
+      const p = await r.projects.create({ ownerId: o, title: 't', initialIdea: 'idea' });
       const got = await r.projects.getById(p.id);
       expect(got?.id).toBe(p.id);
-      expect(got?.ownerId).toBe('o1');
+      expect(got?.ownerId).toBe(o);
       expect(got?.shareId).toBeTruthy();
     });
 
     it('listByOwner 只返回该 owner 的项目', async () => {
       const r = make();
-      await r.projects.create({ ownerId: 'o1', title: 'a', initialIdea: 'i' });
-      await r.projects.create({ ownerId: 'o2', title: 'b', initialIdea: 'i' });
-      const mine = await r.projects.listByOwner('o1');
+      const o1 = owner();
+      const o2 = owner();
+      await r.projects.create({ ownerId: o1, title: 'a', initialIdea: 'i' });
+      await r.projects.create({ ownerId: o2, title: 'b', initialIdea: 'i' });
+      const mine = await r.projects.listByOwner(o1);
       expect(mine).toHaveLength(1);
-      expect(mine[0].ownerId).toBe('o1');
+      expect(mine[0].ownerId).toBe(o1);
     });
 
     it('shareId 唯一：getByShareId 可取回', async () => {
       const r = make();
-      const p = await r.projects.create({ ownerId: 'o1', title: 't', initialIdea: 'i' });
+      const p = await r.projects.create({ ownerId: owner(), title: 't', initialIdea: 'i' });
       const got = await r.projects.getByShareId(p.shareId);
       expect(got?.id).toBe(p.id);
     });
@@ -36,7 +43,16 @@ export function repositoryContract(make: () => Repos): void {
   describe('RunRepository', () => {
     it('create 后 getById 读回，默认 status=running iteration=1', async () => {
       const r = make();
-      const p = await r.projects.create({ ownerId: 'o', title: 't', initialIdea: 'i' });
+      const p = await r.projects.create({ ownerId: owner(), title: 't', initialIdea: 'i' });
+      const got = await r.projects.getByShareId(p.shareId);
+      expect(got?.id).toBe(p.id);
+    });
+  });
+
+  describe('RunRepository', () => {
+    it('create 后 getById 读回，默认 status=running iteration=1', async () => {
+      const r = make();
+      const p = await r.projects.create({ ownerId: owner(), title: 't', initialIdea: 'i' });
       const run = await r.runs.create({ projectId: p.id });
       const got = await r.runs.getById(run.id);
       expect(got?.status).toBe('running');
@@ -45,7 +61,7 @@ export function repositoryContract(make: () => Repos): void {
 
     it('listByProject 按 startedAt 倒序', async () => {
       const r = make();
-      const p = await r.projects.create({ ownerId: 'o', title: 't', initialIdea: 'i' });
+      const p = await r.projects.create({ ownerId: owner(), title: 't', initialIdea: 'i' });
       const r1 = await r.runs.create({ projectId: p.id });
       await new Promise((r2) => setTimeout(r2, 5));
       const r2 = await r.runs.create({ projectId: p.id });
@@ -55,7 +71,7 @@ export function repositoryContract(make: () => Repos): void {
 
     it('setStatus 更新状态与当前阶段', async () => {
       const r = make();
-      const p = await r.projects.create({ ownerId: 'o', title: 't', initialIdea: 'i' });
+      const p = await r.projects.create({ ownerId: owner(), title: 't', initialIdea: 'i' });
       const run = await r.runs.create({ projectId: p.id });
       await r.runs.setStatus(run.id, 'awaiting_approval', 'architecture');
       const got = await r.runs.getById(run.id);
@@ -67,7 +83,7 @@ export function repositoryContract(make: () => Repos): void {
   describe('MessageRepository', () => {
     it('append 自动 seq 递增', async () => {
       const r = make();
-      const p = await r.projects.create({ ownerId: 'o', title: 't', initialIdea: 'i' });
+      const p = await r.projects.create({ ownerId: owner(), title: 't', initialIdea: 'i' });
       const run = await r.runs.create({ projectId: p.id });
       const m1 = await r.messages.append({ runId: run.id, iteration: 1, role: 'pm', stage: 'spec', content: 'a', causeBy: 'RunSpecAction' });
       const m2 = await r.messages.append({ runId: run.id, iteration: 1, role: 'architect', stage: 'architecture', content: 'b', causeBy: 'RunArchitectureAction' });
@@ -77,7 +93,7 @@ export function repositoryContract(make: () => Repos): void {
 
     it('listByRun 按 seq 升序返回', async () => {
       const r = make();
-      const p = await r.projects.create({ ownerId: 'o', title: 't', initialIdea: 'i' });
+      const p = await r.projects.create({ ownerId: owner(), title: 't', initialIdea: 'i' });
       const run = await r.runs.create({ projectId: p.id });
       await r.messages.append({ runId: run.id, iteration: 1, role: 'pm', stage: 'spec', content: 'a', causeBy: 'X' });
       await r.messages.append({ runId: run.id, iteration: 1, role: 'architect', stage: 'architecture', content: 'b', causeBy: 'Y' });
@@ -89,7 +105,7 @@ export function repositoryContract(make: () => Repos): void {
   describe('ArtifactRepository', () => {
     it('save 自动 version 递增', async () => {
       const r = make();
-      const p = await r.projects.create({ ownerId: 'o', title: 't', initialIdea: 'i' });
+      const p = await r.projects.create({ ownerId: owner(), title: 't', initialIdea: 'i' });
       const run = await r.runs.create({ projectId: p.id });
       const a1 = await r.artifacts.save({ runId: run.id, kind: 'html', filename: 'index.html', content: '<html/>' });
       const a2 = await r.artifacts.save({ runId: run.id, kind: 'html', filename: 'index.html', content: '<html>v2</html>' });
@@ -99,7 +115,7 @@ export function repositoryContract(make: () => Repos): void {
 
     it('latestByRun 返回最新版本', async () => {
       const r = make();
-      const p = await r.projects.create({ ownerId: 'o', title: 't', initialIdea: 'i' });
+      const p = await r.projects.create({ ownerId: owner(), title: 't', initialIdea: 'i' });
       const run = await r.runs.create({ projectId: p.id });
       await r.artifacts.save({ runId: run.id, kind: 'html', filename: 'index.html', content: 'v1' });
       await r.artifacts.save({ runId: run.id, kind: 'html', filename: 'index.html', content: 'v2' });
@@ -111,7 +127,7 @@ export function repositoryContract(make: () => Repos): void {
   describe('ApprovalRepository', () => {
     it('record 决策，同一 gate 可多条（驳回后重跑）', async () => {
       const r = make();
-      const p = await r.projects.create({ ownerId: 'o', title: 't', initialIdea: 'i' });
+      const p = await r.projects.create({ ownerId: owner(), title: 't', initialIdea: 'i' });
       const run = await r.runs.create({ projectId: p.id });
       await r.approvals.record({ runId: run.id, gate: 'architecture', decision: false, comment: '重做', iteration: 1 });
       await r.approvals.record({ runId: run.id, gate: 'architecture', decision: true, comment: null, iteration: 2 });

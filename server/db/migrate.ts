@@ -9,8 +9,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export async function migrate(connectionString: string): Promise<void> {
   const db = createNeonDb(connectionString);
   const ddl = readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
-  await db.query(ddl);
-  console.log('[migrate] schema applied');
+  // neon serverless 的 prepared statement 不支持多语句，按分号拆成单条逐句执行
+  const statements = ddl
+    .split(';')
+    .map((s) => s.replace(/--[^\n]*/g, '').trim())
+    .filter((s) => s.length > 0);
+  for (const stmt of statements) {
+    await db.query(stmt);
+  }
+  console.log(`[migrate] schema applied (${statements.length} statements)`);
 }
 
 // 直接运行时执行
