@@ -8,3 +8,22 @@ body,
   height: 100%;
   margin: 0;
 }
+
+/* Markdown 渲染样式（LLM 产物：PRD/架构/承接语） */
+.markdown-body h1 { @apply text-lg font-bold mt-3 mb-2 text-slate-900; }
+.markdown-body h2 { @apply text-base font-bold mt-3 mb-1.5 text-slate-900; }
+.markdown-body h3 { @apply text-sm font-semibold mt-2 mb-1 text-slate-800; }
+.markdown-body p { @apply my-1.5 leading-relaxed; }
+.markdown-body ul, .markdown-body ol { @apply my-1.5 pl-5; }
+.markdown-body ul { @apply list-disc; }
+.markdown-body ol { @apply list-decimal; }
+.markdown-body li { @apply my-0.5; }
+.markdown-body strong { @apply font-semibold text-slate-900; }
+.markdown-body blockquote { @apply border-l-4 border-blue-300 bg-blue-50 pl-3 py-1 my-2 text-slate-600 italic; }
+.markdown-body table { @apply w-full my-2 text-xs border-collapse; }
+.markdown-body th, .markdown-body td { @apply border border-slate-300 px-2 py-1 text-left; }
+.markdown-body th { @apply bg-slate-100 font-semibold; }
+.markdown-body code { @apply rounded bg-slate-200 px-1 py-0.5 text-xs font-mono text-pink-700; }
+.markdown-body pre { @apply my-2 overflow-auto rounded bg-slate-800 p-3 text-xs text-slate-100; }
+.markdown-body pre code { @apply bg-transparent p-0 text-slate-100; }
+.markdown-body hr { @apply my-3 border-slate-300; }
