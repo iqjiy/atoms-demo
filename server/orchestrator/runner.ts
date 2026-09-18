@@ -2,7 +2,7 @@ import { MessageBus } from './bus.js';
 import { ROLES, type Role } from './roles.js';
 import type { ApprovalGate } from './approvalGate.js';
 import { Checkpointer } from './checkpointer.js';
-import { ensureHtml } from './htmlGuard.js';
+import { ensureHtml, injectStorageShim } from './htmlGuard.js';
 import type { LlmClient } from '../llm/client.js';
 import type { AgentMessage, NewArtifact, OrchestratorEvent, Stage } from './types.js';
 
@@ -68,12 +68,12 @@ export class Orchestrator {
       }
     }
 
-    // 4) 收尾：取 code 阶段产物，经 htmlGuard 提纯（R3）后作为最终 Artifact 落库
+    // 4) 收尾：取 code 阶段产物，经 htmlGuard 提纯（R3）+ 注入 storage shim（F-01）后落库
     const codeMsg = [...this.bus.all()].reverse().find((m) => m.stage === 'code');
     const artifact: NewArtifact = {
       kind: 'html',
       filename: 'index.html',
-      content: ensureHtml(codeMsg?.content ?? '', input.idea),
+      content: injectStorageShim(ensureHtml(codeMsg?.content ?? '', input.idea)),
     };
     await checkpointer.saveArtifact(runId, artifact);
     emit({ type: 'run_done', runId, artifact });

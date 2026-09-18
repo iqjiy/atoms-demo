@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { stripClosingQuestion, splitAckAndBody } from '../../../server/orchestrator/postprocess.js';
+import { stripClosingQuestion } from '../../../server/orchestrator/postprocess.js';
 
 describe('stripClosingQuestion 剥离 LLM 对话惯性反问尾巴', () => {
   it('剥离结尾的“需要我…吗”反问', () => {
@@ -16,21 +16,15 @@ describe('stripClosingQuestion 剥离 LLM 对话惯性反问尾巴', () => {
     const body = '# 规格\n\n纯内容，无反问。';
     expect(stripClosingQuestion(body)).toBe(body);
   });
-});
 
-describe('splitAckAndBody 拆分承接语与正式产物', () => {
-  it('以 `---` 分隔：前段为承接语，后段为正式产物', () => {
-    const out = '> 我看了 PRD，核心是扫雷。\n\n---\n\n# 架构设计\n\n内容';
-    const { ack, body } = splitAckAndBody(out);
-    expect(ack).toContain('我看了 PRD');
-    expect(body).toContain('# 架构设计');
-    expect(body).not.toContain('我看了 PRD');
+  it('不误删含关键字的正常内容行（F-02）', () => {
+    // 整行是正常内容，仅含“我可以”等子串，不应被删
+    const body = '# 分析\n\n我可以分析两种场景：一是 A，二是 B。\n这是正文结尾。';
+    expect(stripClosingQuestion(body)).toBe(body);
   });
 
-  it('无分隔符时：ack 为空，整体作为 body', () => {
-    const out = '# 架构设计\n\n内容';
-    const { ack, body } = splitAckAndBody(out);
-    expect(ack).toBe('');
-    expect(body).toBe(out);
+  it('不误删标题里的关键字（F-02）', () => {
+    const body = '内容。\n\n# 是否需要鉴权';
+    expect(stripClosingQuestion(body)).toBe(body);
   });
 });

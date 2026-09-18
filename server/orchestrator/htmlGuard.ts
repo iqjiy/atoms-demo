@@ -72,3 +72,30 @@ export function ensureHtml(raw: string, fallbackTitle: string): string {
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
+
+/**
+ * 内存版 localStorage/sessionStorage 替身（F-01）。
+ * 沙箱（无 allow-same-origin）下访问 localStorage 抛 SecurityError 会使整个 JS 崩溃
+ * → 预览「能看不能玩」。注入此 shim 让调用不抛错。状态刷新即失（沙箱一次性，可接受）。
+ * 参考社区方案：lobe-ui injectStorageShim / vellum sandbox-bridge / open-design #1403。
+ */
+export const STORAGE_SHIM = `<script>(function(){function cs(){var s=Object.create(null);return{get length(){return Object.keys(s).length},key:function(i){var k=Object.keys(s);return i>=0&&i<k.length?k[i]:null},getItem:function(k){return Object.prototype.hasOwnProperty.call(s,k)?s[k]:null},setItem:function(k,v){s[String(k)]=String(v)},removeItem:function(k){delete s[k]},clear:function(){s=Object.create(null)}}}function shim(n){try{window[n];return}catch(e){}try{Object.defineProperty(window,n,{configurable:true,value:cs()})}catch(e){}}shim('localStorage');shim('sessionStorage')})();</script>`;
+
+/**
+ * 把 storage shim 注入到 <head> 最前（必须先于任何用户脚本执行，否则初始化即崩）。
+ * 幂等：已注入则不重复。
+ */
+export function injectStorageShim(html: string): string {
+  if (html.includes(STORAGE_SHIM)) return html;
+  const headOpen = html.search(/<head[^>]*>/i);
+  if (headOpen >= 0) {
+    const insertAt = headOpen + html.match(/<head[^>]*>/i)![0].length;
+    return html.slice(0, insertAt) + STORAGE_SHIM + html.slice(insertAt);
+  }
+  const htmlOpen = html.search(/<html[^>]*>/i);
+  if (htmlOpen >= 0) {
+    const insertAt = htmlOpen + html.match(/<html[^>]*>/i)![0].length;
+    return html.slice(0, insertAt) + STORAGE_SHIM + html.slice(insertAt);
+  }
+  return STORAGE_SHIM + html;
+}

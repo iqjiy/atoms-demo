@@ -30,8 +30,11 @@ function statusBadge(status: StageState['status']) {
   return <span className="rounded bg-red-100 px-2 py-0.5 text-xs text-red-700">失败</span>;
 }
 
-/** 单阶段卡片：角色 + 阶段 + 衔接说明 + Markdown 渲染的流式产物。 */
+/** 单阶段卡片：角色 + 阶段 + 衔接说明 + 产物内容。 */
 export default function StageCard({ stage }: { stage: StageState }) {
+  const isCode = stage.stage === 'code';
+  const isRunning = stage.status === 'running';
+
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
       <div className="flex items-center justify-between">
@@ -44,9 +47,25 @@ export default function StageCard({ stage }: { stage: StageState }) {
         <div className="mt-0.5 text-xs text-slate-400">⤷ {UPSTREAM_LABEL[stage.stage]}</div>
       )}
       {stage.text && (
-        <div className="markdown-body mt-2 max-h-80 overflow-auto rounded bg-slate-50 p-3 text-sm text-slate-700">
-          <div dangerouslySetInnerHTML={{ __html: renderMarkdown(stage.text) }} />
-          {stage.status === 'running' && <span className="animate-pulse">▍</span>}
+        <div className="mt-2 max-h-80 overflow-auto rounded bg-slate-50 p-3 text-sm text-slate-700">
+          {isCode ? (
+            // F-04：代码产物只读展示，不渲染为可交互 HTML（预览在右栏 iframe）
+            <pre className="whitespace-pre-wrap break-words font-mono text-xs text-slate-600">
+              {stage.text}
+            </pre>
+          ) : isRunning ? (
+            // F-05/F-08：流式中显示纯文本，避免半截 markdown 闪烁 + O(n²) 重解析
+            <pre className="whitespace-pre-wrap break-words text-sm">
+              {stage.text}
+              <span className="animate-pulse">▍</span>
+            </pre>
+          ) : (
+            // 完成后一次性 markdown 渲染
+            <div
+              className="markdown-body"
+              dangerouslySetInnerHTML={{ __html: renderMarkdown(stage.text) }}
+            />
+          )}
         </div>
       )}
     </div>

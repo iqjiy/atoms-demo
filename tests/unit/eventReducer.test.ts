@@ -28,9 +28,21 @@ describe('eventReducer：OrchestratorEvent → UI 状态', () => {
     s = reduceEvent(s, start('pm', 'spec'));
     s = reduceEvent(s, {
       type: 'stage_done',
-      message: { stage: 'spec' } as never,
+      message: { stage: 'spec', content: '# 规格' } as never,
     });
     expect(s.stages[0].status).toBe('done');
+  });
+
+  it('stage_done 用最终内容替换流式文本（F-03 UI 与 DB 一致）', () => {
+    let s = initialState();
+    s = reduceEvent(s, start('pm', 'spec'));
+    s = reduceEvent(s, { type: 'token', role: 'pm', stage: 'spec', delta: '正文。需要我展开吗？' });
+    // 后端剥离反问尾巴后，message.content 是干净的
+    s = reduceEvent(s, {
+      type: 'stage_done',
+      message: { stage: 'spec', content: '正文。' } as never,
+    });
+    expect(s.stages[0].text).toBe('正文。');
   });
 
   it('run_done 置整体完成并保存 artifact', () => {
@@ -56,7 +68,7 @@ describe('eventReducer：OrchestratorEvent → UI 状态', () => {
     for (const [role, stage] of [['pm', 'spec'], ['architect', 'architecture'], ['engineer', 'code']] as const) {
       s = reduceEvent(s, start(role, stage));
       s = reduceEvent(s, { type: 'token', role, stage, delta: `${stage}-text` });
-      s = reduceEvent(s, { type: 'stage_done', message: { stage } as never });
+      s = reduceEvent(s, { type: 'stage_done', message: { stage, content: `${stage}-text` } as never });
     }
     expect(s.stages.map((x) => x.stage)).toEqual(['spec', 'architecture', 'code']);
     expect(s.stages.every((x) => x.status === 'done')).toBe(true);

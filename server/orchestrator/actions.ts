@@ -47,8 +47,8 @@ function makeLlmAction(name: string, stage: Stage, system: string, buildPrompt: 
 /** 通用约束：禁止对话惯性反问，产物用 Markdown。 */
 const COMMON_RULES = '\n\n【输出要求】只输出正式产物本身（Markdown 格式）。不要以“好的”“当然可以”开头，结尾不要问“需要我…吗”之类的话。';
 
-/** 承接语要求：先口语化承接上游，再用 --- 分隔，最后是正式产物。 */
-const ACK_RULES = '\n\n【协作要求】先用 1-2 句口语化的话承接上游产物（说明你读到了什么、抓住的核心点、要注意的风险），以 `> ` 引用块呈现；然后单独一行 `---`；之后才是你的正式产物。';
+/** 承接语要求：先口语化承接上游（引用块），再展开正式产物。 */
+const ACK_RULES = '\n\n【协作要求】先用 1-2 句口语化的话承接上游产物（说明你读到了什么、抓住的核心点、要注意的风险），以 `> ` 引用块呈现；空一行后再展开你的正式产物。';
 
 export const specAction = makeLlmAction(
   'RunSpecAction',
