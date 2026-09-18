@@ -23,6 +23,15 @@ function makeLlmAction(name: string, stage: Stage, system: string, buildPrompt: 
     name,
     stage,
     async run(ctx) {
+      // 优先 token 级流式（DeepSeek 支持），逐字回调并累积；无 stream 则一次性 complete
+      if (ctx.llm.stream) {
+        let acc = '';
+        for await (const delta of ctx.llm.stream({ system, prompt: buildPrompt(ctx) })) {
+          acc += delta;
+          ctx.onToken?.(delta);
+        }
+        return acc;
+      }
       const content = await ctx.llm.complete({ system, prompt: buildPrompt(ctx) });
       ctx.onToken?.(content);
       return content;

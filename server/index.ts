@@ -6,6 +6,7 @@ import { env } from './shared/env.js';
 import { createNeonDb } from './db/client.js';
 import { createPostgresRepos } from './db/repositories/postgres.js';
 import { migrate } from './db/migrate.js';
+import { createLlmFromEnv } from './llm/index.js';
 import type { Repos } from './db/repositories/types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -22,7 +23,9 @@ async function buildRepos(): Promise<Repos | undefined> {
 }
 
 const repos = await buildRepos();
-const app = createApp(repos);
+const llm = createLlmFromEnv();
+console.log(`[llm] ${process.env.LLM_API_KEY ? `DeepSeek(${process.env.LLM_MODEL})` : 'Fake(无 LLM_API_KEY，确定性模板)'}`);
+const app = createApp(repos, { llm });
 
 // 生产模式：托管 Vite 构建产物（同源部署，SPA 回退到 index.html）
 if (env.isProd) {

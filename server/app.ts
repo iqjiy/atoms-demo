@@ -2,9 +2,16 @@ import express, { type Express, type Request, type Response, type NextFunction }
 import cookieParser from 'cookie-parser';
 import { healthRouter } from './routes/health.js';
 import { projectsRouter } from './routes/projects.js';
+import { runsRouter } from './routes/runs.js';
+import { streamRouter } from './routes/stream.js';
+import { messagesRouter } from './routes/messages.js';
+import { artifactsRouter } from './routes/artifacts.js';
 import { OWNER_COOKIE, resolveOwner } from './identity/identityService.js';
 import type { Repos } from './db/repositories/types.js';
 import { createInMemoryRepos } from './db/repositories/memory.js';
+import { RunManager } from './orchestrator/runManager.js';
+import type { LlmClient } from './llm/client.js';
+import { FakeLlmClient } from './llm/fakeClient.js';
 
 /**
  * 匿名身份中间件：解析/签发匿名 ownerId，首次访问写 HttpOnly Cookie。
@@ -19,8 +26,15 @@ function identityMiddleware(req: Request, res: Response, next: NextFunction): vo
   next();
 }
 
+export interface AppOptions {
+  llm?: LlmClient;
+}
+
 /** 构建 Express 应用（路由 + 中间件）。与监听分离，便于 supertest 集成测试。 */
-export function createApp(repos: Repos = createInMemoryRepos()): Express {
+export function createApp(repos: Repos = createInMemoryRepos(), opts: AppOptions = {}): Express {
+  const llm = opts.llm ?? new FakeLlmClient();
+  const runManager = new RunManager();
+
   const app = express();
   app.use(express.json());
   app.use(cookieParser());
@@ -28,6 +42,10 @@ export function createApp(repos: Repos = createInMemoryRepos()): Express {
 
   app.use('/api', healthRouter);
   app.use('/api', projectsRouter(repos));
+  app.use('/api', runsRouter({ repos, llm, runManager }));
+  app.use('/api', streamRouter(repos, runManager));
+  app.use('/api', messagesRouter(repos));
+  app.use('/api', artifactsRouter(repos));
 
   return app;
 }

@@ -8,6 +8,9 @@ import type { AgentMessage, NewArtifact, OrchestratorEvent, Stage } from './type
 export interface RunInput {
   idea: string;
   ownerId?: string;
+  /** 预创建的 projectId/runId（HTTP 层需先拿 runId 注册 SSE）；不传则内部创建 */
+  projectId?: string;
+  runId?: string;
 }
 
 export interface RunResult {
@@ -37,14 +40,10 @@ export class Orchestrator {
     const { checkpointer, emit } = this.deps;
     const iteration = 1;
 
-    // 落库：project + run
-    const project = await checkpointer.ensureProject(
-      input.ownerId ?? 'anon',
-      input.idea.slice(0, 30),
-      input.idea,
-    );
-    const run = await checkpointer.ensureRun(project.id);
-    const runId = run.id;
+    // 落库：project + run（HTTP 层可预创建后传入 id，避免重复建）
+    const projectId = input.projectId
+      ?? (await checkpointer.ensureProject(input.ownerId ?? 'anon', input.idea.slice(0, 30), input.idea)).id;
+    const runId = input.runId ?? (await checkpointer.ensureRun(projectId)).id;
 
     // 1) 广播用户需求（等价于 MetaGPT 发布 UserRequirement）
     await this.publishAndStore({
