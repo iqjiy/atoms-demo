@@ -27,4 +27,24 @@ describe('stripClosingQuestion 剥离 LLM 对话惯性反问尾巴', () => {
     const body = '内容。\n\n# 是否需要鉴权';
     expect(stripClosingQuestion(body)).toBe(body);
   });
+
+  it('不误删以「我可以」开头的正文结尾行（review 发现1）', () => {
+    const body = '# 分析\n\n我可以分析两种场景：一是 A，二是 B。';
+    expect(stripClosingQuestion(body)).toBe(body);
+  });
+
+  it('不误删正文中的真实问句（review 发现3）', () => {
+    const body = '权限设计如上。\n\n这个权限我们应该校验吗？';
+    expect(stripClosingQuestion(body)).toBe(body);
+  });
+
+  it('剥离「需要我继续吗」这类纯客套反问（最后一行）', () => {
+    const body = '内容。\n\n需要我继续吗？';
+    expect(stripClosingQuestion(body)).toBe('内容。');
+  });
+
+  it('剥离「需要我帮你调整吗」类', () => {
+    const body = '方案如上。\n\n需要我帮你调整吗？';
+    expect(stripClosingQuestion(body)).toBe('方案如上。');
+  });
 });

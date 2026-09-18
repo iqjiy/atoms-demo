@@ -32,4 +32,24 @@ describe('injectStorageShim 注入内存版 storage 替身', () => {
     const count = (twice.match(/defineProperty/g) || []).length;
     expect(count).toBe(1);
   });
+
+  it('script 内含 <head> 字面量时仍注入到真实 head（review 发现4）', () => {
+    const html = '<!DOCTYPE html><html><head><script>var s="<head>"</script></head><body>x</body></html>';
+    const out = injectStorageShim(html);
+    // shim 必须在真实 <head> 之后、且在该 script 之前
+    const realHead = out.indexOf('<head>');
+    const shimIdx = out.indexOf(STORAGE_SHIM);
+    const scriptIdx = out.indexOf('var s=');
+    expect(shimIdx).toBeGreaterThan(realHead);
+    expect(shimIdx).toBeLessThan(scriptIdx);
+    // shim 不应出现在 script 字符串内部
+    expect(out.indexOf(`var s="<head>${STORAGE_SHIM}`)).toBe(-1);
+  });
+
+  it('script 出现在 head 标签之前且含 <head> 字面量（罕见但可能）', () => {
+    const html = '<!DOCTYPE html><script>var s="<head>"</script><html><head></head><body>x</body></html>';
+    const out = injectStorageShim(html);
+    // shim 不应被注入到 script 字符串里
+    expect(out.indexOf(`var s="<head>${STORAGE_SHIM}`)).toBe(-1);
+  });
 });

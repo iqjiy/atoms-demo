@@ -45,6 +45,19 @@ describe('eventReducer：OrchestratorEvent → UI 状态', () => {
     expect(s.stages[0].text).toBe('正文。');
   });
 
+  it('stage_done 处理后内容为空时保留流式文本（review 发现2）', () => {
+    let s = initialState();
+    s = reduceEvent(s, start('pm', 'spec'));
+    s = reduceEvent(s, { type: 'token', role: 'pm', stage: 'spec', delta: '流式内容' });
+    // 极端：后端剥离后 content 为空
+    s = reduceEvent(s, {
+      type: 'stage_done',
+      message: { stage: 'spec', content: '' } as never,
+    });
+    expect(s.stages[0].text).toBe('流式内容');
+    expect(s.stages[0].status).toBe('done');
+  });
+
   it('run_done 置整体完成并保存 artifact', () => {
     let s = initialState();
     s = reduceEvent(s, start('engineer', 'code'));

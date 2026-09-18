@@ -3,37 +3,41 @@
  * 承接语以 markdown `> ` 引用块自然呈现（前端 markdown 渲染），无需单独拆分字段。
  */
 
-/** 剥离结尾的 LLM 对话惯性反问（“需要我…吗”“是否需要我…”等）。 */
+/**
+ * 剥离结尾的 LLM 对话惯性反问（如「需要我继续展开吗？」）。
+ *
+ * 策略（保守，宁可少删勿误删正文）：
+ * - 只检查**最后一个非空行**；
+ * - 仅当该行是「承接动词开头 + 以问号/句号收尾的纯客套反问」时才删除；
+ * - 不以承接动词开头的行（无论是否含「吗？」「我可以」）一律视为正文保留。
+ *
+ * 这样：
+ * - 「我可以分析两种场景：…」（陈述句，非承接反问）保留；
+ * - 「这个权限我们应该校验吗？」（真实业务问句，非承接开头）保留；
+ * - 「需要我继续吗？」（纯客套反问）删除。
+ */
 export function stripClosingQuestion(text: string): string {
   const lines = text.replace(/\s+$/, '').split('\n');
-  // 从末尾去掉空行与反问/承接性结尾句
-  while (lines.length > 0) {
-    const last = lines[lines.length - 1].trim();
-    if (last === '') {
-      lines.pop();
-      continue;
-    }
-    if (isClosingBoilerplate(last)) {
-      lines.pop();
-      continue;
-    }
-    break;
+  // 定位最后一个非空行
+  let i = lines.length - 1;
+  while (i >= 0 && lines[i].trim() === '') i--;
+  if (i < 0) return text;
+
+  const last = lines[i].trim();
+  if (isClosingBoilerplate(last)) {
+    lines.splice(i, 1);
+    return lines.join('\n').replace(/\s+$/, '');
   }
   return lines.join('\n');
 }
 
 /**
- * 判断某行是否为「对话惯性收尾句」——整行就是客套/反问，而非含关键字的正文。
- * 收紧规则（F-02）：标题（# 开头）与列表/正文行一律不删。
- * 仅匹配以「需要我/要不要我/我可以继续/是否需要/如需/希望对你」等开头、
- * 或整行以「吗？」「么？」收尾且主语是「我」的短句。
+ * 判断是否为「纯客套反问收尾句」：
+ * 必须以承接动词（需要我/要不要我/要我/需要我帮/我可以为你/需要我进一步）开头，
+ * 且以「吗/么/呢」加问号（或句号）结尾——二者同时满足才删，避免误伤正文。
  */
 function isClosingBoilerplate(line: string): boolean {
-  // 标题、列表项、代码 fence 一律视为正文
-  if (/^(#|[-*]|\d+\.|`|>)/.test(line)) return false;
-  // 以承接/客套动词开头的整行
-  if (/^(需要我|要不要我|我可以|是否需要|如果你需要|如需要|如需|希望对你|希望对您|若需要)/.test(line)) return true;
-  // 整行是以「吗/么」结尾的反问且含「我」（如“要我继续吗？”）
-  if (/[吗么]\s*[？?]\s*$/.test(line) && /我/.test(line) && line.length <= 40) return true;
-  return false;
+  const startsWithOffer = /^(需要我|要不要我|要我|我可以为你|需要我帮|是否要我)/.test(line);
+  const isQuestionish = /[吗么呢]\s*[？?。]\s*$/.test(line);
+  return startsWithOffer && isQuestionish;
 }

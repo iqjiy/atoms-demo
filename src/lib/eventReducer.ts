@@ -40,10 +40,15 @@ export function reduceEvent(state: TimelineState, e: OrchestratorEvent): Timelin
       return { ...state, stages };
     }
     case 'stage_done': {
-      // F-03：用剥离/提纯后的最终内容替换流式累积文本，使 UI 与落库一致
+      // F-03：用剥离/提纯后的最终内容替换流式累积文本，使 UI 与落库一致。
+      // 但若处理后内容为空（整段被判为客套话），保留流式文本避免阶段内容消失（review 发现2）。
       const stages = state.stages.map((s) =>
         s.stage === e.message.stage
-          ? { ...s, status: 'done' as const, text: e.message.content }
+          ? {
+              ...s,
+              status: 'done' as const,
+              text: e.message.content?.trim() ? e.message.content : s.text,
+            }
           : s,
       );
       return { ...state, stages };
