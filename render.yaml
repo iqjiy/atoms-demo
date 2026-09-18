@@ -2,7 +2,7 @@ services:
   - type: web
     name: atoms-demo
     runtime: node
-    buildCommand: npm install && npm run build
+    buildCommand: npm install --include=dev && npm run build
     startCommand: npm start
     plan: free
     autoDeploy: true
