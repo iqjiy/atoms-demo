@@ -14,6 +14,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.1.0",
     "cookie-parser": "^1.4.7",
     "express": "^5.2.1",
     "react": "^19.3.0",
