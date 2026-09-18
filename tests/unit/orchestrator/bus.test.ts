@@ -1,0 +1,76 @@
+import { describe, it, expect } from 'vitest';
+import { MessageBus } from '../../../server/orchestrator/bus.js';
+import type { AgentMessage } from '../../../shared-types/index.js';
+
+function msg(causeBy: string, stage: AgentMessage['stage'], content = 'x'): AgentMessage {
+  return {
+    id: `id-${causeBy}`,
+    runId: 'run1',
+    artifactId: null,
+    seq: 0,
+    iteration: 1,
+    role: 'pm',
+    stage,
+    content,
+    causeBy,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+describe('MessageBus 类型订阅路由', () => {
+  it('publish 后仅 watch 命中 causeBy 的订阅者被唤醒', () => {
+    const bus = new MessageBus();
+    const hits: string[] = [];
+    bus.watch(['RunSpecAction'], () => hits.push('architect'));
+    bus.watch(['RunCodeAction'], () => hits.push('someoneElse'));
+
+    bus.publish(msg('RunSpecAction', 'spec'));
+    expect(hits).toEqual(['architect']);
+  });
+
+  it('未订阅该 causeBy 的订阅者不被触发', () => {
+    const bus = new MessageBus();
+    let called = 0;
+    bus.watch(['RunCodeAction'], () => called++);
+    bus.publish(msg('RunSpecAction', 'spec'));
+    expect(called).toBe(0);
+  });
+
+  it('同一 causeBy 的多个订阅者都被触发', () => {
+    const bus = new MessageBus();
+    const hits: string[] = [];
+    bus.watch(['RunSpecAction'], () => hits.push('a'));
+    bus.watch(['RunSpecAction'], () => hits.push('b'));
+    bus.publish(msg('RunSpecAction', 'spec'));
+    expect(hits).toEqual(['a', 'b']);
+  });
+
+  it('新增订阅不改主流程：动态 watch 一个新角色即可接收', () => {
+    const bus = new MessageBus();
+    const hits: string[] = [];
+    bus.publish(msg('RunSpecAction', 'spec')); // 之前无订阅
+    bus.watch(['RunSpecAction'], () => hits.push('late'));
+    bus.publish(msg('RunSpecAction', 'spec'));
+    expect(hits).toEqual(['late']);
+  });
+});
+
+describe('MessageBus 上下文裁剪', () => {
+  it('contextFor 只返回指定阶段的产物，且按阶段标注', () => {
+    const bus = new MessageBus();
+    bus.publish(msg('RunRequirementAction', 'requirement', '做一个待办应用'));
+    bus.publish(msg('RunSpecAction', 'spec', '## 规格 ...'));
+    bus.publish(msg('RunArchitectureAction', 'architecture', '## 架构 ...'));
+
+    const ctx = bus.contextFor(['requirement', 'spec']);
+    expect(ctx).toContain('做一个待办应用');
+    expect(ctx).toContain('## 规格');
+    expect(ctx).not.toContain('## 架构');
+  });
+
+  it('contextFor 空数组返回空串', () => {
+    const bus = new MessageBus();
+    bus.publish(msg('RunSpecAction', 'spec', 's'));
+    expect(bus.contextFor([])).toBe('');
+  });
+});
