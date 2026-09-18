@@ -2,6 +2,12 @@
 
 多 Agent 协作驱动应用生成的 Demo（P0 脚手架阶段）。
 
+## 在线体验
+
+**https://atoms-demo-7yvj.onrender.com/**
+
+> 部署于 Render（常驻 Node 服务，Express 托管前端 `dist` + API 同源）。免费实例闲置 15 分钟后休眠，首次访问可能需等待冷启动。
+
 ## 本地开发
 
 ```bash
