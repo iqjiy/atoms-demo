@@ -1,11 +1,14 @@
 import { useState } from 'react';
 import ChatInput from './components/chat/ChatInput';
 import AgentTimeline from './components/timeline/AgentTimeline';
+import PreviewFrame from './components/preview/PreviewFrame';
+import PreviewToolbar from './components/preview/PreviewToolbar';
 import { startRun, useRunStream } from './hooks/useRunStream';
 
 export default function App() {
   const [runId, setRunId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
   const state = useRunStream(runId);
   const running = runId !== null && !state.done && !state.error;
 
@@ -38,16 +41,24 @@ export default function App() {
         <AgentTimeline state={state} />
       </section>
 
-      {/* 右栏：预览（P4 接管 iframe） */}
-      <section className="flex-1 bg-white p-4">
-        <h2 className="mb-3 text-sm font-medium text-slate-700">预览</h2>
+      {/* 右栏：预览 */}
+      <section className="flex flex-1 flex-col bg-white p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-sm font-medium text-slate-700">预览</h2>
+          {state.artifact && (
+            <PreviewToolbar
+              html={state.artifact.content}
+              onRefresh={() => setRefreshKey((k) => k + 1)}
+            />
+          )}
+        </div>
         {state.artifact ? (
-          <div className="text-sm text-slate-500">
-            产物已生成（{state.artifact.content.length} 字符），实时预览在下一阶段接入。
+          <div className="min-h-0 flex-1">
+            <PreviewFrame html={state.artifact.content} refreshKey={refreshKey} />
           </div>
         ) : (
           <div className="flex h-64 items-center justify-center rounded-md border border-dashed border-slate-300 text-sm text-slate-400">
-            生成的应用将在此实时预览
+            {running ? '正在生成，完成后将在此实时预览…' : '生成的应用将在此实时预览'}
           </div>
         )}
       </section>

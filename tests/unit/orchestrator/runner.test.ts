@@ -77,4 +77,29 @@ describe('Orchestrator 三阶段接力', () => {
     expect(stages).not.toContain('code');
     expect(stages).toContain('architecture');
   });
+
+  it('工程师输出带 markdown 包裹时，落库 artifact 被提纯为纯 HTML（R3）', async () => {
+    const { repos } = setup();
+    // 模拟真实 LLM：工程师输出带说明前缀 + ```html 包裹
+    const messyLlm = new FakeLlmClient();
+    messyLlm.complete = async (req) => {
+      if (req.system.includes('工程师')) {
+        return '以下是代码：\n```html\n<!DOCTYPE html>\n<html><body>ok</body></html>\n```\n希望有用';
+      }
+      return new FakeLlmClient().complete(req);
+    };
+    const orc = new Orchestrator({
+      llm: messyLlm,
+      gate: new AutoApproveGate(),
+      checkpointer: new Checkpointer(repos),
+      emit: () => {},
+    });
+    const result = await orc.runProject({ idea: 'x' });
+
+    expect(result.artifact.content).not.toContain('```');
+    expect(result.artifact.content).not.toContain('以下是');
+    expect(result.artifact.content.trimEnd().endsWith('</html>')).toBe(true);
+    const art = await repos.artifacts.latestByRun(result.runId);
+    expect(art?.content).toBe(result.artifact.content);
+  });
 });
