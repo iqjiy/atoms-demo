@@ -83,7 +83,8 @@ describe('Orchestrator 三阶段接力', () => {
     const result = await orc.runProject({ idea: 'x' });
 
     const msgs = await repos.messages.listByRun(result.runId);
-    const count = (s: string) => msgs.filter((m) => m.stage === s).length;
+    // 驳回意见是旁白非产物（修改1B/2 ReviewFeedback），此处按产物统计
+    const count = (s: string) => msgs.filter((m) => m.stage === s && m.causeBy !== 'ReviewFeedback').length;
     // spec 被驳回 2 次后第 3 次批准 → 共跑 3 次；下游各 1 次
     expect(count('spec')).toBe(3);
     expect(count('architecture')).toBe(1);
@@ -277,6 +278,70 @@ describe('Orchestrator 三阶段接力', () => {
     expect(files.filter((f) => f.path === 'src/index.html')).toHaveLength(1);
   });
 
+  it('修改1B/2: 驳回时落一条 ReviewFeedback 消息(replyTo 指向被驳产物)，且不污染产物', async () => {
+    const { repos, events } = setup();
+    // gate: spec 第1次驳回(comment='重写规格') 第2次通过；其余自动过
+    const gate = {
+      calls: 0,
+      async wait(_r: string, g: string) {
+        if (g === 'spec') {
+          this.calls++;
+          return this.calls === 1 ? { approved: false, comment: '重写规格' } : { approved: true };
+        }
+        return { approved: true };
+      },
+    };
+    const orc = new Orchestrator({
+      llm: new FakeLlmClient(),
+      gate: gate as any,
+      checkpointer: new Checkpointer(repos),
+      emit: (e) => events.push(e),
+    });
+    const result = await orc.runProject({ idea: '做一个待办应用' });
+
+    const msgs = await repos.messages.listByRun(result.runId);
+    // 1) 存在一条 ReviewFeedback：content 含驳回意见、replyTo 指向被驳回那版 spec（iteration 1）
+    const fb = msgs.find((m) => m.causeBy === 'ReviewFeedback');
+    expect(fb).toBeTruthy();
+    expect(fb!.content).toContain('重写规格');
+    const rejectedSpec = msgs.find((m) => m.stage === 'spec' && m.iteration === 1 && m.causeBy !== 'ReviewFeedback');
+    expect(rejectedSpec).toBeTruthy();
+    expect(fb!.replyTo).toBe(rejectedSpec!.id);
+
+    // 2) 不污染产物：spec 产物仍是 RunSpecAction（feedback 不算 spec 产物）
+    const specProducts = msgs.filter((m) => m.stage === 'spec' && m.causeBy !== 'ReviewFeedback');
+    expect(specProducts.map((m) => m.iteration)).toEqual([1, 2]); // 被驳 v1 + 通过 v2
+
+    // 3) stage_done 事件携带了反馈消息（前端可据此出气泡，Task 5 渲染）
+    const fbEvent = events.find(
+      (e) => e.type === 'stage_done' && e.message.causeBy === 'ReviewFeedback',
+    ) as Extract<OrchestratorEvent, { type: 'stage_done' }> | undefined;
+    expect(fbEvent).toBeTruthy();
+    expect(fbEvent!.message.replyTo).toBe(rejectedSpec!.id);
+
+    // 4) 裸驳回（无 comment）不落反馈消息
+    const { repos: repos2 } = setup();
+    const gate2 = {
+      calls: 0,
+      async wait(_r: string, g: string) {
+        if (g === 'spec') {
+          this.calls++;
+          return this.calls === 1 ? { approved: false, comment: '' } : { approved: true };
+        }
+        return { approved: true };
+      },
+    };
+    const orc2 = new Orchestrator({
+      llm: new FakeLlmClient(),
+      gate: gate2 as any,
+      checkpointer: new Checkpointer(repos2),
+      emit: () => {},
+    });
+    const result2 = await orc2.runProject({ idea: 'x' });
+    const msgs2 = await repos2.messages.listByRun(result2.runId);
+    expect(msgs2.some((m) => m.causeBy === 'ReviewFeedback')).toBe(false);
+  });
+
   it('T4: run_done 携带的 artifact 与 repos.artifacts.latestByRun 一致（兜底重放）', async () => {
     const { repos, events } = setup();
     const orc = new Orchestrator({
@@ -344,13 +409,14 @@ describe('P5 逐级审批闸门（单向向前、驳回只重跑本级）', () =
     // spec 被拒一次后重跑再批，故 spec 闸门等了 2 次
     expect(gate.gates).toEqual(['spec', 'spec', 'architecture', 'code']);
     // 落库消息里 spec 出现 2 次（重跑 1 次），architecture/code 各 1 次
+    // （修改1B/2：ReviewFeedback 是旁白非产物，按产物统计）
     const msgs = await repos.messages.listByRun(result.runId);
-    const count = (s: string) => msgs.filter((m) => m.stage === s).length;
+    const count = (s: string) => msgs.filter((m) => m.stage === s && m.causeBy !== 'ReviewFeedback').length;
     expect(count('spec')).toBe(2);
     expect(count('architecture')).toBe(1);
     expect(count('code')).toBe(1);
     // 重跑的 spec 属于 iteration 2
-    const specIters = msgs.filter((m) => m.stage === 'spec').map((m) => m.iteration);
+    const specIters = msgs.filter((m) => m.stage === 'spec' && m.causeBy !== 'ReviewFeedback').map((m) => m.iteration);
     expect(specIters).toEqual([1, 2]);
   });
 
@@ -368,7 +434,8 @@ describe('P5 逐级审批闸门（单向向前、驳回只重跑本级）', () =
 
     expect(gate.gates).toEqual(['spec', 'architecture', 'architecture', 'code']);
     const msgs = await repos.messages.listByRun(result.runId);
-    const count = (s: string) => msgs.filter((m) => m.stage === s).length;
+    // 修改1B/2：ReviewFeedback 是旁白非产物，按产物统计
+    const count = (s: string) => msgs.filter((m) => m.stage === s && m.causeBy !== 'ReviewFeedback').length;
     // spec 只跑了 1 次（单向，不回头）
     expect(count('spec')).toBe(1);
     expect(count('architecture')).toBe(2);

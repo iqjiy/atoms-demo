@@ -117,6 +117,16 @@ export class Orchestrator {
       if (iteration >= MAX_STAGE_ITERATION) return false;
       // review R5：重跑期间把状态拉回 running，避免 DB 停留 awaiting_approval 导致重放出假审批卡/决策 410
       await this.deps.checkpointer.setRunStatus(runId, 'running', gate);
+      // 修改1B/2：驳回意见作为一等消息进流（渲染气泡 + 进被驳agent上下文），replyTo 指向被驳产物
+      if (decision.comment?.trim()) {
+        const rejected = this.bus.latestOfStage(gate); // 被驳那版（重跑前的最新；bus 已排除反馈）
+        const fb = await this.deps.checkpointer.appendMessage({
+          runId, iteration, role: 'reviewer', stage: gate,
+          content: decision.comment.trim(), causeBy: 'ReviewFeedback', replyTo: rejected?.id ?? null,
+        });
+        this.bus.publish(fb); // 进 bus（contextFor/latestOfStage 已排除，不污染产物；供重放/补发携带）
+        this.deps.emit({ type: 'stage_done', message: fb }); // 复用 stage_done 让前端出气泡（见 Task 5 渲染区分）
+      }
       feedback = decision.comment ?? null;
       iteration += 1;
     }
