@@ -19,6 +19,8 @@ export type OrchestratorEvent =
   | { type: 'stage_done'; message: AgentMessage }
   | { type: 'approval_required'; runId: string; gate: string; summary: string }
   | { type: 'run_done'; runId: string; artifact: NewArtifact }
+  | { type: 'artifact_ready'; runId: string; artifact: NewArtifact }
+  | { type: 'files_saved'; runId: string; stage: Stage }
   | { type: 'error'; stage: Stage; message: string; retryable: boolean };
 
 export type { AgentMessage, Artifact, Stage };

@@ -85,3 +85,16 @@ describe('MessageBus 上下文裁剪', () => {
     expect(ctx).not.toContain('规格 v1（被驳回）');
   });
 });
+
+describe('MessageBus latestOfStage', () => {
+  it('latestOfStage 返回该 stage 最新一版（驳回重跑后取新）', () => {
+    const bus = new MessageBus();
+    bus.publish({ ...msg('RunSpecAction', 'spec', 'v1'), iteration: 1 });
+    bus.publish({ ...msg('RunSpecAction', 'spec', 'v2'), iteration: 2 });
+    bus.publish(msg('RunCodeAction', 'code', 'c'));
+
+    expect(bus.latestOfStage('spec')?.content).toBe('v2');
+    expect(bus.latestOfStage('code')?.content).toBe('c');
+    expect(bus.latestOfStage('architecture')).toBeUndefined();
+  });
+});

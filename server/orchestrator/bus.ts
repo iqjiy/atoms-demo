@@ -45,6 +45,13 @@ export class MessageBus {
       .join('\n\n');
   }
 
+  /** 取某 stage 最新一版 message（驳回重跑后取新）；无则 undefined。 */
+  latestOfStage(stage: Stage): AgentMessage | undefined {
+    let latest: AgentMessage | undefined;
+    for (const m of this.messages) if (m.stage === stage) latest = m; // 后发布覆盖先发布
+    return latest;
+  }
+
   /** 只读访问已发布消息（runner 收尾取产物用）。 */
   all(): readonly AgentMessage[] {
     return this.messages;
