@@ -53,8 +53,6 @@ export default function App() {
 
   const runId = active?.latestRun?.runId ?? null;
   const { state: baseState, progress } = useSession(runId);
-  /** 每阶段开始时间戳（进度条计时用）：首次成为 current 时记录，不随 iteration 重置 */
-  const [stageStarts, setStageStarts] = useState<Partial<Record<Stage, number>>>({});
   // 叠加底部输入框的「壳」用户消息（纯展示，不触发重跑）
   const withUser = userMessages.reduce((s, m) => appendUserMessage(s, m), baseState);
   // 提交后、runId 未就位时用 optimistic 占位；一旦有真实数据则切换
@@ -63,6 +61,8 @@ export default function App() {
   const displayProgress = pendingStart && baseState.items.length === 0
     ? { current: 'spec' as Stage, doneStages: [] as Stage[], running: true }
     : progress;
+  // 阶段计时起点来自 chat state（reducer 数据层），不再用渲染层 effect
+  const stageStarts = state.stageStarts;
 
   const refreshSessions = useCallback(async () => {
     try {
@@ -85,21 +85,6 @@ export default function App() {
   useEffect(() => {
     if (baseState.items.length > 0) setPendingStart(null);
   }, [baseState.items.length]);
-
-  // 阶段首次成为 current 时记录开始时间戳（进度条计时起点）。
-  // pendingStart 期间 progress 为空，spec 已在跑（optimistic），也计入起点。
-  const effectiveCurrent: Stage | null = progress.current ?? (pendingStart ? 'spec' : null);
-  useEffect(() => {
-    if (!effectiveCurrent) return;
-    setStageStarts((prev) =>
-      prev[effectiveCurrent] !== undefined ? prev : { ...prev, [effectiveCurrent]: Date.now() },
-    );
-  }, [effectiveCurrent]);
-
-  // 会话切换 / 新建 / run 结束，重置阶段计时
-  useEffect(() => {
-    setStageStarts({});
-  }, [runId]);
 
   // run 完成 / 会话切换后拉文件树
   useEffect(() => {

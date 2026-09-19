@@ -149,5 +149,7 @@ export function mergeReplayWithLive(replayed: ChatState, live: ChatState): ChatS
     error: live.error ?? replayed.error,
     artifact: live.artifact ?? replayed.artifact,
     livePreview: live.livePreview ?? replayed.livePreview,
+    // stageStarts：live 优先（含实时计时），replay 兜底（历史会话）
+    stageStarts: { ...replayed.stageStarts, ...live.stageStarts },
   };
 }

@@ -221,6 +221,42 @@ describe('stageProgress：从气泡派生当前阶段与已完成阶段', () => 
   });
 });
 
+describe('stageStarts：阶段计时起点（PM timer fix）', () => {
+  it('stage_start 事件为该阶段记录开始时间戳', () => {
+    let s: ChatState = initialChatState();
+    s = reduceChatEvent(s, { type: 'stage_start', role: 'pm', stage: 'spec', iteration: 1 });
+    expect(s.stageStarts['spec']).toBeDefined();
+    expect(typeof s.stageStarts['spec']).toBe('number');
+  });
+
+  it('重发同一阶段的 stage_start 不覆盖已有起点（幂等）', () => {
+    let s: ChatState = initialChatState();
+    s = reduceChatEvent(s, { type: 'stage_start', role: 'pm', stage: 'spec', iteration: 1 });
+    const first = s.stageStarts['spec']!;
+    s = reduceChatEvent(s, { type: 'stage_start', role: 'pm', stage: 'spec', iteration: 2 });
+    expect(s.stageStarts['spec']).toBe(first);
+  });
+
+  it('markPendingStart 立刻记录 spec 起点（PM 计时提交即起跳）', () => {
+    let s: ChatState = initialChatState();
+    s = markPendingStart(s, '做一个待办应用');
+    expect(s.stageStarts['spec']).toBeDefined();
+    expect(typeof s.stageStarts['spec']).toBe('number');
+  });
+
+  it('buildReplayState 从消息 createdAt 填充各阶段起点', () => {
+    const t1 = '2026-01-01T10:00:00.000Z';
+    const t2 = '2026-01-01T10:01:00.000Z';
+    const messages: AgentMessage[] = [
+      { id: '1', runId: 'r1', artifactId: null, seq: 1, iteration: 1, role: 'pm', stage: 'spec', content: '规格', causeBy: 'RunSpecAction', createdAt: t1 },
+      { id: '2', runId: 'r1', artifactId: null, seq: 2, iteration: 1, role: 'architect', stage: 'architecture', content: '架构', causeBy: 'RunArchAction', createdAt: t2 },
+    ];
+    const s = buildReplayState(messages, { status: 'running', currentStage: 'architecture' } as Run, null);
+    expect(s.stageStarts['spec']).toBe(new Date(t1).getTime());
+    expect(s.stageStarts['architecture']).toBe(new Date(t2).getTime());
+  });
+});
+
 describe('code-review 修复（C5）', () => {
   it('重放保留 requirement 为用户气泡（右），不丢原始想法', () => {
     const messages = [
