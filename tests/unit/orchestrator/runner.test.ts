@@ -210,6 +210,66 @@ describe('Orchestrator 三阶段接力', () => {
     expect(art!.filename).toBe('index.html');
     expect(art!.content).toContain('<');
   });
+
+  it('问题2: 每级通过才落文件；被驳回的中间版不落盘', async () => {
+    const { repos } = setup();
+    // 闸门：spec 第一次驳回、第二次通过；其余自动通过
+    const gate = {
+      calls: 0,
+      async wait(_r: string, g: string) {
+        if (g === 'spec') {
+          this.calls++;
+          return this.calls === 1 ? { approved: false, comment: '重写' } : { approved: true };
+        }
+        return { approved: true };
+      },
+    };
+    // 在 files_saved 事件触发瞬间检查 repo：该级文件应已落盘（T3 前：false；T3 后：true）
+    const filesSavedSnapshot: Array<{ stage: string; presentAtEmit: boolean; iters: number[] }> = [];
+    const pending: Promise<void>[] = [];
+    const emit = (e: OrchestratorEvent) => {
+      if (e.type === 'files_saved') {
+        const stage = e.stage;
+        const runId = e.runId;
+        const path = stage === 'spec' ? 'pm/spec.md' : stage === 'architecture' ? 'architect/arch.md' : null;
+        const sync = async () => {
+          const all = await repos.files.listByRun(runId);
+          const matches = path ? all.filter((f) => f.path === path) : all.filter((f) => f.path.startsWith('src/'));
+          filesSavedSnapshot.push({ stage, presentAtEmit: matches.length > 0, iters: matches.map((m) => m.iteration) });
+        };
+        // emit 是同步回调，排队 async 检查
+        pending.push(sync());
+      }
+    };
+    const orc = new Orchestrator({
+      llm: new FakeLlmClient(),
+      gate: gate as any,
+      checkpointer: new Checkpointer(repos),
+      emit,
+    });
+    const result = await orc.runProject({ idea: '做一个待办应用' });
+    await Promise.all(pending);
+
+    // T3 核心断言：spec 批准瞬间 pm/spec.md 已落盘；architecture 批准瞬间 architect/arch.md 已落盘；code 批准瞬间 src/* 已落盘
+    const specSnap = filesSavedSnapshot.find((s) => s.stage === 'spec');
+    const archSnap = filesSavedSnapshot.find((s) => s.stage === 'architecture');
+    const codeSnap = filesSavedSnapshot.find((s) => s.stage === 'code');
+    expect(specSnap?.presentAtEmit).toBe(true);
+    expect(archSnap?.presentAtEmit).toBe(true);
+    expect(codeSnap?.presentAtEmit).toBe(true);
+    // spec 批准时刻落的版本必须是 iteration=2（通过版），不能是 1（被驳回版）
+    expect(specSnap!.iters.length).toBeGreaterThan(0);
+    expect(specSnap!.iters.every((i) => i === 2)).toBe(true);
+
+    // 收尾后汇总断言
+    const files = await repos.files.listByRun(result.runId);
+    const specFiles = files.filter((f) => f.path === 'pm/spec.md');
+    // 被驳回的中间版（iteration 1）不落盘：所有 spec 文件 iteration 都应是通过版 2
+    expect(specFiles.every((f) => f.iteration === 2)).toBe(true);
+    expect(specFiles.some((f) => f.iteration === 1)).toBe(false);
+    expect(files.map((f) => f.path)).toEqual(expect.arrayContaining(['pm/spec.md', 'architect/arch.md']));
+    expect(files.some((f) => f.path.startsWith('src/'))).toBe(true);
+  });
 });
 
 describe('P5 逐级审批闸门（单向向前、驳回只重跑本级）', () => {
