@@ -55,7 +55,13 @@ function AgentBubble({ item }: { item: ChatItem }) {
         </div>
         <div className="rounded-2xl rounded-tl-sm border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm">
           {!item.text && streaming ? (
-            <span className="text-slate-400">正在输入…</span>
+            <span className="flex items-center gap-1.5 text-slate-400">
+              <span
+                className="inline-block h-3 w-3 animate-spin rounded-full border border-slate-300 border-t-transparent"
+                aria-label="加载中"
+              />
+              {item.role === 'pm' ? 'PM 正在思考…' : '正在输入…'}
+            </span>
           ) : isCode ? (
             // code 产物只读展示（预览在右栏 iframe），长代码折叠
             <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-slate-500">

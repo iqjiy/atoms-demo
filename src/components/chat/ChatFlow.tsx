@@ -1,14 +1,20 @@
-import type { ChatState } from '../../lib/chatReducer.js';
+import type { ChatState, stageProgress } from '../../lib/chatReducer.js';
+import type { Stage } from '../../../server/orchestrator/types.js';
 import ChatBubble from './ChatBubble.js';
 import ApprovalCard from './ApprovalCard.js';
+import StageProgress from './StageProgress.js';
 
-/** 中栏聊天流：agent 左 / 用户右气泡 + 气泡下审批卡。 */
+/** 中栏聊天流：agent 左 / 用户右气泡 + 气泡下审批卡 + 顶部三步进度条。 */
 export default function ChatFlow({
   state,
+  progress,
+  stageStarts,
   deciding,
   onDecide,
 }: {
   state: ChatState;
+  progress: ReturnType<typeof stageProgress>;
+  stageStarts: Partial<Record<Stage, number>>;
   deciding?: boolean;
   onDecide: (gate: string, approved: boolean, comment?: string) => void;
 }) {
@@ -19,8 +25,10 @@ export default function ChatFlow({
       </div>
     );
   }
+  const terminal = state.done ? 'done' : state.error ? 'error' : null;
   return (
     <div className="space-y-4">
+      <StageProgress progress={progress} stageStarts={stageStarts} terminal={terminal} />
       {state.items.map((item) => (
         <div key={item.id}>
           <ChatBubble item={item} />
