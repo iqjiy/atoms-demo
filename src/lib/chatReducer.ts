@@ -134,6 +134,36 @@ export function markPendingStart(state: ChatState, idea: string): ChatState {
 }
 
 /**
+ * 由聊天气泡派生进度条状态（Task 4 进度条用）。
+ * - doneStages：最新一轮 status='done' 的阶段
+ * - current：正在 streaming 的阶段（无则 null）
+ * - running：未结束（!done && !error）且有任何 streaming 活动
+ */
+export function stageProgress(state: ChatState): {
+  current: Stage | null;
+  doneStages: Stage[];
+  running: boolean;
+} {
+  // 每个 stage 取最新一轮（iteration 最大）的气泡状态。
+  // 仅关注 agent 三阶段（spec/architecture/code）；requirement（用户原始想法）不算进度条阶段。
+  const PROGRESS_STAGES: readonly Stage[] = ['spec', 'architecture', 'code'];
+  const latestByStage = new Map<Stage, ChatItem>();
+  for (const it of state.items) {
+    if (!it.stage || !PROGRESS_STAGES.includes(it.stage)) continue;
+    const prev = latestByStage.get(it.stage);
+    if (!prev || it.iteration >= prev.iteration) latestByStage.set(it.stage, it);
+  }
+  const doneStages: Stage[] = [];
+  let current: Stage | null = null;
+  for (const [stage, it] of latestByStage) {
+    if (it.status === 'done') doneStages.push(stage);
+    else if (it.status === 'streaming' && current === null) current = stage;
+  }
+  const running = !state.done && !state.error && current !== null;
+  return { current, doneStages, running };
+}
+
+/**
  * 关页/切换会话重放：由已落库消息 + run 状态重建聊天气泡流。
  * status=awaiting_approval 时，给当前待决策阶段的最后一条气泡挂审批卡。
  */

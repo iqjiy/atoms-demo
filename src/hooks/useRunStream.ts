@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { OrchestratorEvent } from '../../server/orchestrator/types.js';
-import { initialChatState, reduceChatEvent, buildReplayState, type ChatState } from '../lib/chatReducer.js';
+import { initialChatState, reduceChatEvent, buildReplayState, stageProgress, type ChatState } from '../lib/chatReducer.js';
 import type { AgentMessage, Artifact, DocFile, Run } from '../../shared-types/index.js';
 
 export interface RunHandle {
@@ -88,7 +88,7 @@ export function useRunStream(runId: string | null): ChatState {
  * 会话加载（切换会话/关页重放）：拉 messages + run 状态 + artifact，
  * 进行中则交 SSE 续流，否则用 buildReplayState 重建。
  */
-export function useSession(runId: string | null): { state: ChatState; live: boolean } {
+export function useSession(runId: string | null): { state: ChatState; live: boolean; progress: ReturnType<typeof stageProgress> } {
   const live = useRunStream(runId);
   const [replayed, setReplayed] = useState<ChatState>(initialChatState());
   const [isLive, setIsLive] = useState(false);
@@ -121,7 +121,8 @@ export function useSession(runId: string | null): { state: ChatState; live: bool
   }, [runId]);
 
   // 进行中：以重放为基线叠加 SSE 增量；已结束：纯重放
-  return { state: isLive ? mergeReplayWithLive(replayed, live) : replayed, live: isLive };
+  const state = isLive ? mergeReplayWithLive(replayed, live) : replayed;
+  return { state, live: isLive, progress: stageProgress(state) };
 }
 
 /**
