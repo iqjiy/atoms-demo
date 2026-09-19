@@ -51,4 +51,22 @@ describe('RunManager 进程内运行管理', () => {
     rm.finish('r1');
     expect(rm.isActive('r1')).toBe(false);
   });
+
+  it('进行中 subscribe 前已 emit 的事件可通过 history() 取回（补发）', () => {
+    const rm = new RunManager();
+    rm.register('r1');
+    rm.emit('r1', { type: 'stage_start', role: 'pm', stage: 'spec', iteration: 1 });
+    rm.emit('r1', { type: 'token', role: 'pm', stage: 'spec', delta: '你好' });
+    const hist = rm.history('r1');
+    expect(hist).toHaveLength(2);
+    expect(hist[1]).toMatchObject({ type: 'token', delta: '你好' });
+  });
+
+  it('finish 后清空缓存（history 为空）', () => {
+    const rm = new RunManager();
+    rm.register('r1');
+    rm.emit('r1', { type: 'stage_start', role: 'pm', stage: 'spec', iteration: 1 });
+    rm.finish('r1');
+    expect(rm.history('r1')).toEqual([]);
+  });
 });

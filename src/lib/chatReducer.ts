@@ -21,10 +21,12 @@ export interface ChatState {
   artifact: { kind: string; filename: string; content: string } | null;
   /** code 阶段流式累积的 partial HTML（生成中实时预览用；run_done 后被 artifact 取代） */
   livePreview: string | null;
+  /** 各阶段开始时间戳（进度条计时用）：首次 stage_start 时记录，不随 iteration 重置 */
+  stageStarts: Partial<Record<Stage, number>>;
 }
 
 export function initialChatState(): ChatState {
-  return { items: [], done: false, error: null, artifact: null, livePreview: null };
+  return { items: [], done: false, error: null, artifact: null, livePreview: null, stageStarts: {} };
 }
 
 const bubbleId = (stage: string | undefined, iteration: number, side: string) =>
@@ -50,7 +52,11 @@ export function reduceChatEvent(state: ChatState, e: OrchestratorEvent): ChatSta
             status: 'streaming' as const,
             pendingApproval: null,
           });
-      return { ...state, items };
+      // 记录阶段计时起点：仅在尚未记录时写入（幂等，重跑不覆盖）
+      const stageStarts = state.stageStarts[e.stage] !== undefined
+        ? state.stageStarts
+        : { ...state.stageStarts, [e.stage]: Date.now() };
+      return { ...state, items, stageStarts };
     }
     case 'token': {
       const items = state.items.map((it) =>
@@ -130,7 +136,37 @@ export function markPendingStart(state: ChatState, idea: string): ChatState {
     status: 'streaming' as const,
     pendingApproval: null,
   };
-  return { ...withUser, items: [...withUser.items, pmPlaceholder] };
+  return { ...withUser, items: [...withUser.items, pmPlaceholder], stageStarts: { ...withUser.stageStarts, spec: Date.now() } };
+}
+
+/**
+ * 由聊天气泡派生进度条状态（Task 4 进度条用）。
+ * - doneStages：最新一轮 status='done' 的阶段
+ * - current：正在 streaming 的阶段（无则 null）
+ * - running：未结束（!done && !error）且有任何 streaming 活动
+ */
+export function stageProgress(state: ChatState): {
+  current: Stage | null;
+  doneStages: Stage[];
+  running: boolean;
+} {
+  // 每个 stage 取最新一轮（iteration 最大）的气泡状态。
+  // 仅关注 agent 三阶段（spec/architecture/code）；requirement（用户原始想法）不算进度条阶段。
+  const PROGRESS_STAGES: readonly Stage[] = ['spec', 'architecture', 'code'];
+  const latestByStage = new Map<Stage, ChatItem>();
+  for (const it of state.items) {
+    if (!it.stage || !PROGRESS_STAGES.includes(it.stage)) continue;
+    const prev = latestByStage.get(it.stage);
+    if (!prev || it.iteration >= prev.iteration) latestByStage.set(it.stage, it);
+  }
+  const doneStages: Stage[] = [];
+  let current: Stage | null = null;
+  for (const [stage, it] of latestByStage) {
+    if (it.status === 'done') doneStages.push(stage);
+    else if (it.status === 'streaming' && current === null) current = stage;
+  }
+  const running = !state.done && !state.error && current !== null;
+  return { current, doneStages, running };
 }
 
 /**
@@ -178,6 +214,16 @@ export function buildReplayState(
   }
 
   const done = run.status === 'completed';
+
+  // 从消息 createdAt 填充各阶段计时起点（每阶段取第一条消息的时间）
+  const stageStarts: Partial<Record<Stage, number>> = {};
+  for (const m of messages) {
+    if (m.stage && stageStarts[m.stage] === undefined) {
+      const t = new Date(m.createdAt).getTime();
+      if (!isNaN(t)) stageStarts[m.stage] = t;
+    }
+  }
+
   return {
     items,
     done,
@@ -185,5 +231,6 @@ export function buildReplayState(
     error: run.status === 'failed' ? (run.error ?? '运行失败') : null,
     artifact: done && artifact ? { kind: artifact.kind, filename: artifact.filename, content: artifact.content } : null,
     livePreview: null, // 重放场景用已落库 artifact，无需 livePreview
+    stageStarts,
   };
 }

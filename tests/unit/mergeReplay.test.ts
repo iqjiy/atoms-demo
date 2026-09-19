@@ -32,4 +32,19 @@ describe('mergeReplayWithLive：进行中刷新重放 + SSE 增量合并（revie
     const merged = mergeReplayWithLive(replayed, initialChatState());
     expect(merged.items).toHaveLength(1);
   });
+
+  it('同 key 时 replay 的完整 done 气泡不被 live 空气泡覆盖（进行中进入不丢 PM 结果）', () => {
+    const replayed = { ...initialChatState(), items: [agentBubble('spec', 1, '完整PM产物', 'done')] };
+    const live = { ...initialChatState(), items: [agentBubble('spec', 1, '', 'streaming')] }; // 中途进入只收到 stage_start
+    const merged = mergeReplayWithLive(replayed, live);
+    const spec = merged.items.find((i) => i.stage === 'spec');
+    expect(spec?.text).toBe('完整PM产物'); // 取完整版，不被空气泡盖掉
+  });
+
+  it('live 有更新内容时仍用 live（流式推进不被回退）', () => {
+    const replayed = { ...initialChatState(), items: [agentBubble('spec', 1, '旧', 'streaming')] };
+    const live = { ...initialChatState(), items: [agentBubble('spec', 1, '旧内容+新token', 'streaming')] };
+    const merged = mergeReplayWithLive(replayed, live);
+    expect(merged.items.find((i) => i.stage === 'spec')?.text).toBe('旧内容+新token');
+  });
 });

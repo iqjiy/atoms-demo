@@ -16,6 +16,7 @@ import {
 } from './hooks/useRunStream';
 import { appendUserMessage, markPendingStart, initialChatState, type ChatState } from './lib/chatReducer';
 import type { DocFile } from '../shared-types/index.js';
+import type { Stage } from '../shared-types/index.js';
 
 export default function App() {
   const [sessions, setSessions] = useState<SessionItem[]>([]);
@@ -51,11 +52,17 @@ export default function App() {
   }, []);
 
   const runId = active?.latestRun?.runId ?? null;
-  const { state: baseState } = useSession(runId);
+  const { state: baseState, progress } = useSession(runId);
   // 叠加底部输入框的「壳」用户消息（纯展示，不触发重跑）
   const withUser = userMessages.reduce((s, m) => appendUserMessage(s, m), baseState);
   // 提交后、runId 未就位时用 optimistic 占位；一旦有真实数据则切换
   const state = pendingStart && baseState.items.length === 0 ? pendingStart : withUser;
+  // pendingStart 期间 progress 为空，合成「PM 进行中」让进度条立刻亮起
+  const displayProgress = pendingStart && baseState.items.length === 0
+    ? { current: 'spec' as Stage, doneStages: [] as Stage[], running: true }
+    : progress;
+  // 阶段计时起点来自 chat state（reducer 数据层），不再用渲染层 effect
+  const stageStarts = state.stageStarts;
 
   const refreshSessions = useCallback(async () => {
     try {
@@ -201,7 +208,7 @@ export default function App() {
         <div className="min-h-0 flex-1 overflow-auto p-4">
           {active || pendingStart ? (
             // 消白屏：提交后 active 尚未 set（等 runId），但 pendingStart 已让 ChatFlow 立即渲染占位气泡
-            <ChatFlow state={state} deciding={deciding} onDecide={handleDecide} />
+            <ChatFlow state={state} progress={displayProgress} stageStarts={stageStarts} deciding={deciding} onDecide={handleDecide} />
           ) : (
             <div className="flex h-full items-center justify-center rounded-md border border-dashed border-slate-300 p-6 text-center text-sm text-slate-400">
               选择左侧会话，或在上方输入想法开始新会话

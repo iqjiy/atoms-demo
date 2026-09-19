@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { OrchestratorEvent } from '../../server/orchestrator/types.js';
-import { initialChatState, reduceChatEvent, buildReplayState, type ChatState } from '../lib/chatReducer.js';
+import { initialChatState, reduceChatEvent, buildReplayState, stageProgress, type ChatState } from '../lib/chatReducer.js';
 import type { AgentMessage, Artifact, DocFile, Run } from '../../shared-types/index.js';
 
 export interface RunHandle {
@@ -88,7 +88,7 @@ export function useRunStream(runId: string | null): ChatState {
  * 会话加载（切换会话/关页重放）：拉 messages + run 状态 + artifact，
  * 进行中则交 SSE 续流，否则用 buildReplayState 重建。
  */
-export function useSession(runId: string | null): { state: ChatState; live: boolean } {
+export function useSession(runId: string | null): { state: ChatState; live: boolean; progress: ReturnType<typeof stageProgress> } {
   const live = useRunStream(runId);
   const [replayed, setReplayed] = useState<ChatState>(initialChatState());
   const [isLive, setIsLive] = useState(false);
@@ -121,7 +121,8 @@ export function useSession(runId: string | null): { state: ChatState; live: bool
   }, [runId]);
 
   // 进行中：以重放为基线叠加 SSE 增量；已结束：纯重放
-  return { state: isLive ? mergeReplayWithLive(replayed, live) : replayed, live: isLive };
+  const state = isLive ? mergeReplayWithLive(replayed, live) : replayed;
+  return { state, live: isLive, progress: stageProgress(state) };
 }
 
 /**
@@ -131,15 +132,24 @@ export function useSession(runId: string | null): { state: ChatState; live: bool
  */
 export function mergeReplayWithLive(replayed: ChatState, live: ChatState): ChatState {
   const key = (it: ChatState['items'][number]) => `${it.side}:${it.stage ?? 'msg'}:${it.iteration}`;
+  const replayByKey = new Map(replayed.items.map((it) => [key(it), it]));
   const liveKeys = new Map(live.items.map((it) => [key(it), it]));
   // 重放气泡：仅保留 live 未覆盖的（历史）；live 气泡：全部（含更新/新增/流式）
   const historical = replayed.items.filter((it) => !liveKeys.has(key(it)));
-  const items = [...historical, ...live.items];
+  // 兜底：同 key 时若 replayed 已 done 且 text 更长（live 还在空/流式早期），用 replayed 完整版，防空气泡盖完整气泡
+  const liveResolved = live.items.map((it) => {
+    const r = replayByKey.get(key(it));
+    if (r && r.status === 'done' && r.text.length > it.text.length) return r;
+    return it;
+  });
+  const items = [...historical, ...liveResolved];
   return {
     items,
     done: live.done || replayed.done,
     error: live.error ?? replayed.error,
     artifact: live.artifact ?? replayed.artifact,
     livePreview: live.livePreview ?? replayed.livePreview,
+    // stageStarts：live 优先（含实时计时），replay 兜底（历史会话）
+    stageStarts: { ...replayed.stageStarts, ...live.stageStarts },
   };
 }

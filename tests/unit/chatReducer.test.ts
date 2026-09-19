@@ -5,7 +5,9 @@ import {
   appendUserMessage,
   buildReplayState,
   markPendingStart,
+  stageProgress,
   type ChatState,
+  type ChatItem,
 } from '../../src/lib/chatReducer.js';
 import type { OrchestratorEvent } from '../../server/orchestrator/types.js';
 import type { AgentMessage, Run } from '../../shared-types/index.js';
@@ -162,6 +164,96 @@ describe('code-review 修复（R1/R2/R5）', () => {
     s = reduceChatEvent(s, { type: 'approval_required', runId: 'r', gate: 'spec', summary: '' });
     s = reduceChatEvent(s, { type: 'error', stage: 'spec', message: 'x', retryable: true });
     expect(s.items[0].pendingApproval).toBeNull();
+  });
+});
+
+describe('stageProgress：从气泡派生当前阶段与已完成阶段', () => {
+  const agentBubble = (stage: ChatItem['stage'], iteration: number, text: string, status: ChatItem['status']): ChatItem => ({
+    id: `agent-${stage}-${iteration}`,
+    side: 'agent',
+    role: 'pm',
+    stage,
+    iteration,
+    text,
+    status,
+    pendingApproval: null,
+  });
+
+  it('spec done + architecture streaming → doneStages 含 spec，current=architecture，running=true', () => {
+    const s: ChatState = { ...initialChatState(), items: [
+      agentBubble('spec', 1, '...', 'done'),
+      agentBubble('architecture', 1, '', 'streaming'),
+    ]};
+    const p = stageProgress(s);
+    expect(p.doneStages).toContain('spec');
+    expect(p.current).toBe('architecture');
+    expect(p.running).toBe(true);
+  });
+
+  it('空 items + 未结束 → current=null，running=false', () => {
+    const p = stageProgress(initialChatState());
+    expect(p.current).toBeNull();
+    expect(p.doneStages).toEqual([]);
+    expect(p.running).toBe(false);
+  });
+
+  it('state.done=true → running=false 且无 current', () => {
+    const s: ChatState = { ...initialChatState(), done: true, items: [
+      agentBubble('spec', 1, '...', 'done'),
+      agentBubble('code', 1, '...', 'done'),
+    ]};
+    const p = stageProgress(s);
+    expect(p.running).toBe(false);
+    expect(p.current).toBeNull();
+    expect(p.doneStages).toContain('spec');
+    expect(p.doneStages).toContain('code');
+  });
+
+  it('同阶段多轮：以最新一轮的 status 判定 done', () => {
+    const s: ChatState = { ...initialChatState(), items: [
+      agentBubble('spec', 1, 'v1', 'done'),
+      agentBubble('spec', 2, '', 'streaming'),
+    ]};
+    const p = stageProgress(s);
+    // 最新一轮 spec 还在 streaming → 不算 done，且 current=spec
+    expect(p.doneStages).not.toContain('spec');
+    expect(p.current).toBe('spec');
+  });
+});
+
+describe('stageStarts：阶段计时起点（PM timer fix）', () => {
+  it('stage_start 事件为该阶段记录开始时间戳', () => {
+    let s: ChatState = initialChatState();
+    s = reduceChatEvent(s, { type: 'stage_start', role: 'pm', stage: 'spec', iteration: 1 });
+    expect(s.stageStarts['spec']).toBeDefined();
+    expect(typeof s.stageStarts['spec']).toBe('number');
+  });
+
+  it('重发同一阶段的 stage_start 不覆盖已有起点（幂等）', () => {
+    let s: ChatState = initialChatState();
+    s = reduceChatEvent(s, { type: 'stage_start', role: 'pm', stage: 'spec', iteration: 1 });
+    const first = s.stageStarts['spec']!;
+    s = reduceChatEvent(s, { type: 'stage_start', role: 'pm', stage: 'spec', iteration: 2 });
+    expect(s.stageStarts['spec']).toBe(first);
+  });
+
+  it('markPendingStart 立刻记录 spec 起点（PM 计时提交即起跳）', () => {
+    let s: ChatState = initialChatState();
+    s = markPendingStart(s, '做一个待办应用');
+    expect(s.stageStarts['spec']).toBeDefined();
+    expect(typeof s.stageStarts['spec']).toBe('number');
+  });
+
+  it('buildReplayState 从消息 createdAt 填充各阶段起点', () => {
+    const t1 = '2026-01-01T10:00:00.000Z';
+    const t2 = '2026-01-01T10:01:00.000Z';
+    const messages: AgentMessage[] = [
+      { id: '1', runId: 'r1', artifactId: null, seq: 1, iteration: 1, role: 'pm', stage: 'spec', content: '规格', causeBy: 'RunSpecAction', createdAt: t1 },
+      { id: '2', runId: 'r1', artifactId: null, seq: 2, iteration: 1, role: 'architect', stage: 'architecture', content: '架构', causeBy: 'RunArchAction', createdAt: t2 },
+    ];
+    const s = buildReplayState(messages, { status: 'running', currentStage: 'architecture' } as Run, null);
+    expect(s.stageStarts['spec']).toBe(new Date(t1).getTime());
+    expect(s.stageStarts['architecture']).toBe(new Date(t2).getTime());
   });
 });
 
