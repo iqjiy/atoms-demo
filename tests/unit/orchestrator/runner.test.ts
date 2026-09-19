@@ -181,6 +181,35 @@ describe('Orchestrator 三阶段接力', () => {
     expect(result.artifact.filename).toBe('index.html');
     expect(result.artifact.content).toContain('<');
   });
+
+  it('问题2: 工程师 code 完成即落 artifact + emit artifact_ready（预览不依赖收尾）', async () => {
+    const { repos, events } = setup();
+    const orc = new Orchestrator({
+      llm: new FakeLlmClient(),
+      gate: new AutoApproveGate(),
+      checkpointer: new Checkpointer(repos),
+      emit: (e) => events.push(e),
+    });
+    const result = await orc.runProject({ idea: '做一个待办应用' });
+
+    // 时机断言：artifact_ready 必须在 run_done 之前发出（工程师 stage_done 时预览就可用）
+    const types = events.map((e) => e.type);
+    const readyIdx = types.indexOf('artifact_ready');
+    const runDoneIdx = types.indexOf('run_done');
+    expect(readyIdx).toBeGreaterThanOrEqual(0);
+    expect(readyIdx).toBeLessThan(runDoneIdx);
+
+    // artifact_ready 载荷：自包含 HTML
+    const readyEv = events.find((e) => e.type === 'artifact_ready') as Extract<OrchestratorEvent, { type: 'artifact_ready' }>;
+    expect(readyEv.artifact.filename).toBe('index.html');
+    expect(readyEv.artifact.content).toContain('<');
+
+    // 落库可读回（不必等收尾）
+    const art = await repos.artifacts.latestByRun(result.runId);
+    expect(art).toBeTruthy();
+    expect(art!.filename).toBe('index.html');
+    expect(art!.content).toContain('<');
+  });
 });
 
 describe('P5 逐级审批闸门（单向向前、驳回只重跑本级）', () => {

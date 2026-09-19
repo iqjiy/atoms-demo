@@ -155,6 +155,19 @@ export class Orchestrator {
       content, causeBy: role.action.name,
     });
     emit({ type: 'stage_done', message });
+
+    // 问题2：工程师 code 一完成即组装+落 artifact + emit artifact_ready（预览立即可用，供审核评判；不等整 run 收尾）。
+    // 预览永不为空：parseFiles 空→单文件 ensureHtml；assembleHtml null→ensureHtml 兜底（含空/截断修复）。
+    if (role.name === 'engineer') {
+      const parsed = parseFiles(message.content, 'src');
+      const assembled = parsed.length ? assembleHtml(parsed) : null;
+      const artifact: NewArtifact = {
+        kind: 'html', filename: 'index.html',
+        content: injectStorageShim(ensureHtml(assembled ?? message.content, idea)),
+      };
+      await this.deps.checkpointer.saveArtifact(runId, artifact);
+      emit({ type: 'artifact_ready', runId, artifact });
+    }
   }
 
   private async publishAndStore(input: {
