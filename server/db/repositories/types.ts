@@ -32,6 +32,7 @@ export interface MessageRepository {
     content: string;
     causeBy: string;
     artifactId?: string | null;
+    replyTo?: string | null;
   }): Promise<AgentMessage>;
   listByRun(runId: string): Promise<AgentMessage[]>;
 }

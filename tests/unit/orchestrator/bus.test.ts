@@ -98,3 +98,14 @@ describe('MessageBus latestOfStage', () => {
     expect(bus.latestOfStage('architecture')).toBeUndefined();
   });
 });
+
+describe('MessageBus 反馈消息（红线：不污染产物/下游上下文）', () => {
+  it('ReviewFeedback 反馈消息不污染 contextFor / latestOfStage', () => {
+    const bus = new MessageBus();
+    bus.publish(msg('RunSpecAction', 'spec', '规格v1'));
+    bus.publish({ ...msg('ReviewFeedback', 'spec', '驳回:配色改深'), role: 'reviewer' });
+    expect(bus.latestOfStage('spec')?.content).toBe('规格v1'); // 仍是产物，不是反馈
+    expect(bus.contextFor(['spec'])).toContain('规格v1');
+    expect(bus.contextFor(['spec'])).not.toContain('驳回:配色改深'); // 反馈不进下游上下文
+  });
+});

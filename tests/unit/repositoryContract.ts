@@ -100,6 +100,24 @@ export function repositoryContract(make: () => Repos): void {
       const list = await r.messages.listByRun(run.id);
       expect(list.map((m) => m.content)).toEqual(['a', 'b']);
     });
+
+    it('append 带 replyTo 可读回；不传时为 null', async () => {
+      const r = make();
+      const p = await r.projects.create({ ownerId: owner(), title: 't', initialIdea: 'i' });
+      const run = await r.runs.create({ projectId: p.id });
+      const product = await r.messages.append({ runId: run.id, iteration: 1, role: 'pm', stage: 'spec', content: '规格v1', causeBy: 'RunSpecAction' });
+      expect(product.replyTo ?? null).toBeNull();
+      const feedback = await r.messages.append({
+        runId: run.id, iteration: 1, role: 'reviewer', stage: 'spec',
+        content: '驳回:配色改深', causeBy: 'ReviewFeedback', replyTo: product.id,
+      });
+      expect(feedback.replyTo).toBe(product.id);
+      const list = await r.messages.listByRun(run.id);
+      const back = list.find((m) => m.id === feedback.id);
+      expect(back?.replyTo).toBe(product.id);
+      const backProduct = list.find((m) => m.id === product.id);
+      expect(backProduct?.replyTo ?? null).toBeNull();
+    });
   });
 
   describe('ArtifactRepository', () => {

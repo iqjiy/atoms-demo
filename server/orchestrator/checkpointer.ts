@@ -24,6 +24,7 @@ export class Checkpointer {
     stage: Stage;
     content: string;
     causeBy: string;
+    replyTo?: string | null;
   }) {
     return this.repos.messages.append(input);
   }
