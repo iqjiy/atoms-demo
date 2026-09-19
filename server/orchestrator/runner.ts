@@ -83,14 +83,15 @@ export class Orchestrator {
         await checkpointer.saveFiles(runId, msg.iteration, role.name, role.action.stage, toSave);
       }
 
-      // 组装预览 HTML：优先工程师多文件组装，失败回退单文件 ensureHtml 兜底
+      // 组装预览 HTML：优先工程师多文件组装；组装的/单文件的统一过 ensureHtml
+      // （提取/闭合校验/截断修复/兜底模板），保证预览永不为空且结构完整（review I-1）。
       const codeMsg = all.filter((m) => m.stage === 'code').pop();
       const parsed = parseFiles(codeMsg?.content ?? '', 'src');
       const assembled = parsed.length ? assembleHtml(parsed) : null;
       const artifact: NewArtifact = {
         kind: 'html',
         filename: 'index.html',
-        content: injectStorageShim(assembled ?? ensureHtml(codeMsg?.content ?? '', input.idea)),
+        content: injectStorageShim(ensureHtml(assembled ?? codeMsg?.content ?? '', input.idea)),
       };
       await checkpointer.saveArtifact(runId, artifact);
       await checkpointer.setRunStatus(runId, 'completed', 'code');
