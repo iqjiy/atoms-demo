@@ -4,15 +4,18 @@ import ChatFlow from './components/chat/ChatFlow';
 import ChatComposer from './components/chat/ChatComposer';
 import PreviewFrame from './components/preview/PreviewFrame';
 import PreviewToolbar from './components/preview/PreviewToolbar';
+import FileTree from './components/files/FileTree';
+import FileViewer from './components/files/FileViewer';
 import {
   startRun,
   postDecision,
   listSessions,
+  listFiles,
   useSession,
   type SessionItem,
 } from './hooks/useRunStream';
 import { appendUserMessage, markPendingStart, initialChatState, type ChatState } from './lib/chatReducer';
-import { extractHtmlForPreview } from './lib/htmlPreview';
+import type { DocFile } from '../shared-types/index.js';
 
 export default function App() {
   const [sessions, setSessions] = useState<SessionItem[]>([]);
@@ -28,6 +31,9 @@ export default function App() {
   /** 预览全屏（Fullscreen API） */
   const [isFullscreen, setIsFullscreen] = useState(false);
   const previewSectionRef = useRef<HTMLElement | null>(null);
+  /** 工作区文件树 */
+  const [files, setFiles] = useState<DocFile[]>([]);
+  const [activeFile, setActiveFile] = useState<DocFile | null>(null);
 
   const toggleFullscreen = useCallback(async () => {
     if (document.fullscreenElement) {
@@ -50,7 +56,6 @@ export default function App() {
   const withUser = userMessages.reduce((s, m) => appendUserMessage(s, m), baseState);
   // 提交后、runId 未就位时用 optimistic 占位；一旦有真实数据则切换
   const state = pendingStart && baseState.items.length === 0 ? pendingStart : withUser;
-  const running = (runId !== null && !baseState.done && !baseState.error) || pendingStart !== null;
 
   const refreshSessions = useCallback(async () => {
     try {
@@ -74,27 +79,20 @@ export default function App() {
     if (baseState.items.length > 0) setPendingStart(null);
   }, [baseState.items.length]);
 
-  // 生成中预览节流：livePreview 每个 token 都变，直接喂 iframe 会每 token 整页重载（闪烁+卡）。
-  // 真节流（review C1）：不能做成 debounce——每个 token 都 clearTimeout 会导致密集 token 下永不到帧。
-  // 改为「定时器独立跑 + 每帧取最新 livePreview」，token 再密也能按 ~350ms 出帧。
-  const [throttledPreview, setThrottledPreview] = useState<string | null>(null);
-  const livePreviewRef = useRef<string | null>(null);
-  livePreviewRef.current = state.livePreview;
-  const previewTimerBusy = useRef(false);
+  // run 完成 / 会话切换后拉文件树
   useEffect(() => {
-    if (state.livePreview == null) {
-      setThrottledPreview(null);
-      previewTimerBusy.current = false;
+    if (!runId) {
+      setFiles([]);
+      setActiveFile(null);
       return;
     }
-    if (previewTimerBusy.current) return; // 已有定时器在跑
-    previewTimerBusy.current = true;
-    const t = setTimeout(() => {
-      setThrottledPreview(livePreviewRef.current); // 取最新，而非闭包旧值
-      previewTimerBusy.current = false;
-    }, 350);
-    return () => { /* 不在 cleanup clearTimeout，否则变 debounce */ void t; };
-  }, [state.livePreview]);
+    if (!baseState.done) return;
+    let cancelled = false;
+    listFiles(runId)
+      .then((fs) => { if (!cancelled) setFiles(fs); })
+      .catch(() => { /* 忽略文件加载失败 */ });
+    return () => { cancelled = true; };
+  }, [runId, baseState.done]);
 
   const handleNew = () => {
     setActive(null);
@@ -215,40 +213,70 @@ export default function App() {
         {(active || pendingStart) && <ChatComposer onSend={handleUserSend} />}
       </section>
 
-      {/* 右栏：预览（支持全屏，修问题3：宽度受限看不全） */}
+      {/* 右栏：工作区（目录卡片 + 文件查看 + 全屏预览按钮） */}
       <section
         ref={previewSectionRef}
         className={`flex flex-1 flex-col bg-white p-4 ${isFullscreen ? 'fixed inset-0 z-50' : ''}`}
       >
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-medium text-slate-700">
-            预览
-            {throttledPreview && !state.artifact && (
-              <span className="ml-2 rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-700">生成中…</span>
-            )}
-          </h2>
-          {(state.artifact || throttledPreview) && (
-            <PreviewToolbar
-              html={state.artifact?.content ?? extractHtmlForPreview(throttledPreview ?? '') ?? ''}
-              onRefresh={() => setRefreshKey((k) => k + 1)}
-              isFullscreen={isFullscreen}
-              onToggleFullscreen={toggleFullscreen}
-            />
-          )}
-        </div>
-        {state.artifact ? (
-          <div className="min-h-0 flex-1">
-            <PreviewFrame html={state.artifact.content} refreshKey={refreshKey} />
-          </div>
-        ) : throttledPreview && extractHtmlForPreview(throttledPreview) ? (
-          // 生成中预览：提纯（去承接语/```围栏）后实时渲染纯 HTML（修问题1：预览被文档污染）
-          <div className="min-h-0 flex-1">
-            <PreviewFrame html={extractHtmlForPreview(throttledPreview)!} refreshKey={0} />
-          </div>
+        {isFullscreen && state.artifact ? (
+          // 全屏模式：只显示产物 iframe + 工具栏
+          <>
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-sm font-medium text-slate-700">预览</h2>
+              <PreviewToolbar
+                html={state.artifact.content}
+                onRefresh={() => setRefreshKey((k) => k + 1)}
+                isFullscreen={isFullscreen}
+                onToggleFullscreen={toggleFullscreen}
+              />
+            </div>
+            <div className="min-h-0 flex-1">
+              <PreviewFrame html={state.artifact.content} refreshKey={refreshKey} />
+            </div>
+          </>
         ) : (
-          <div className="flex h-64 items-center justify-center rounded-md border border-dashed border-slate-300 text-sm text-slate-400">
-            {running ? '正在生成，工程师产出代码时将在此实时预览…' : '生成的应用将在此实时预览'}
-          </div>
+          <>
+            {/* 顶部：全屏预览按钮（未就绪白色禁用，就绪绿色可点） */}
+            <div className="mb-3">
+              <button
+                type="button"
+                onClick={toggleFullscreen}
+                disabled={!state.artifact}
+                className={`w-full rounded-md px-4 py-2 text-sm font-medium ${
+                  state.artifact
+                    ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                    : 'cursor-not-allowed border border-slate-300 bg-white text-slate-400'
+                }`}
+              >
+                ▶ 全屏预览
+              </button>
+            </div>
+
+            {/* 中部：文件查看器（选中文件时显示，否则显示目录树） */}
+            {activeFile ? (
+              <div className="flex min-h-0 flex-1 flex-col">
+                <button
+                  type="button"
+                  onClick={() => setActiveFile(null)}
+                  className="mb-2 self-start rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
+                >
+                  ← 返回目录
+                </button>
+                <div className="min-h-0 flex-1">
+                  <FileViewer file={activeFile} />
+                </div>
+              </div>
+            ) : (
+              <div className="min-h-0 flex-1 overflow-auto">
+                <FileTree files={files} activePath={null} onSelect={setActiveFile} />
+              </div>
+            )}
+
+            {/* 底部：静态提示 */}
+            <p className="mt-3 text-xs text-slate-400">
+              所有文件会在对话过程中由 Agent 生成并保存，点击目录即可查看文件内容
+            </p>
+          </>
         )}
       </section>
     </div>
