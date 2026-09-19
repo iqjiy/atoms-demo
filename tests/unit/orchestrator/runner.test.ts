@@ -269,6 +269,31 @@ describe('Orchestrator 三阶段接力', () => {
     expect(specFiles.some((f) => f.iteration === 1)).toBe(false);
     expect(files.map((f) => f.path)).toEqual(expect.arrayContaining(['pm/spec.md', 'architect/arch.md']));
     expect(files.some((f) => f.path.startsWith('src/'))).toBe(true);
+
+    // T4：每级通过的文件恰好各落一次（不再被收尾二次落盘）
+    expect(files.filter((f) => f.path === 'pm/spec.md')).toHaveLength(1);
+    expect(files.filter((f) => f.path === 'architect/arch.md')).toHaveLength(1);
+    // 工程师阶段：FakeLlmClient 单文件输出 → src/index.html 恰好一次
+    expect(files.filter((f) => f.path === 'src/index.html')).toHaveLength(1);
+  });
+
+  it('T4: run_done 携带的 artifact 与 repos.artifacts.latestByRun 一致（兜底重放）', async () => {
+    const { repos, events } = setup();
+    const orc = new Orchestrator({
+      llm: new FakeLlmClient(),
+      gate: new AutoApproveGate(),
+      checkpointer: new Checkpointer(repos),
+      emit: (e) => events.push(e),
+    });
+    const result = await orc.runProject({ idea: '做一个待办应用' });
+
+    const runDone = events.find((e) => e.type === 'run_done') as Extract<OrchestratorEvent, { type: 'run_done' }> | undefined;
+    expect(runDone).toBeTruthy();
+    const latest = await repos.artifacts.latestByRun(result.runId);
+    expect(latest).toBeTruthy();
+    expect(runDone!.artifact).toEqual({ kind: latest!.kind, filename: latest!.filename, content: latest!.content });
+    // 同时与 RunResult.artifact 一致
+    expect(result.artifact).toEqual(runDone!.artifact);
   });
 });
 

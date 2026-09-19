@@ -37,6 +37,13 @@ export class Checkpointer {
     });
   }
 
+  /** 读取该 run 最新 artifact（映射回 NewArtifact 形状）；无则返回 null。用于 run_done 兜底重放。 */
+  async latestArtifact(runId: string): Promise<NewArtifact | null> {
+    const a = await this.repos.artifacts.latestByRun(runId);
+    if (!a) return null;
+    return { kind: a.kind, filename: a.filename, content: a.content };
+  }
+
   /** docu-system：把某角色本轮的一组文件落库（path→content）。 */
   async saveFiles(runId: string, iteration: number, role: string, stage: Stage, files: Array<{ path: string; content: string }>) {
     return Promise.all(files.map((f) => this.repos.files.save({ runId, iteration, path: f.path, role, stage, content: f.content })));
