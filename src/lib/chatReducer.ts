@@ -202,32 +202,6 @@ export function stageProgress(state: ChatState): {
 }
 
 /**
- * 点「通过/驳回」瞬间的乐观更新（本地动作，非 SSE）：
- * 立刻清该阶段审批卡并在最新一轮气泡记 decision，渲染「✓ 已通过 / ✕ 已驳回」条，
- * 不等 postDecision 回包、也不等下一级 stage_start。
- */
-export function markDecision(state: ChatState, gate: string, approved: boolean): ChatState {
-  let lastIdx = -1;
-  state.items.forEach((it, i) => { if (it.stage === gate && it.kind !== 'feedback') lastIdx = i; });
-  const items = state.items.map((it, i) =>
-    i === lastIdx ? { ...it, pendingApproval: null, decision: approved ? 'approved' as const : 'rejected' as const } : it,
-  );
-  return { ...state, items };
-}
-
-/** postDecision 失败时回滚 markDecision：恢复该阶段最新一轮的审批卡，清 decision 标记。 */
-export function rollbackDecision(state: ChatState, gate: string): ChatState {
-  let lastIdx = -1;
-  state.items.forEach((it, i) => { if (it.stage === gate && it.kind !== 'feedback') lastIdx = i; });
-  const items = state.items.map((it, i) => {
-    if (i !== lastIdx) return it;
-    const { decision: _dropped, ...rest } = it;
-    return { ...rest, pendingApproval: { gate } };
-  });
-  return { ...state, items };
-}
-
-/**
  * 关页/切换会话重放：由已落库消息 + run 状态重建聊天气泡流。
  * status=awaiting_approval 时，给当前待决策阶段的最后一条气泡挂审批卡。
  */

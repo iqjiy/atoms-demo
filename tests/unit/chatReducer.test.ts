@@ -5,8 +5,6 @@ import {
   appendUserMessage,
   buildReplayState,
   markPendingStart,
-  markDecision,
-  rollbackDecision,
   stageProgress,
   type ChatState,
   type ChatItem,
@@ -346,37 +344,5 @@ describe('修改1：驳回意见气泡（ReviewFeedback）', () => {
     expect(specBubbles.map((i) => i.text)).toEqual(['规格 v1', '规格 v2']);
     expect(s.items.indexOf(fb!)).toBeGreaterThan(s.items.indexOf(specBubbles[0]));
     expect(s.items.indexOf(fb!)).toBeLessThan(s.items.indexOf(specBubbles[1]));
-  });
-});
-
-describe('修改1：通过/驳回即时反馈（markDecision 乐观更新 + 回滚）', () => {
-  const pendingState = (): ChatState => {
-    let s = initialChatState();
-    s = reduceChatEvent(s, start('pm', 'spec', 1));
-    s = reduceChatEvent(s, { type: 'stage_done', message: { stage: 'spec', iteration: 1, content: 'v1' } as never });
-    s = reduceChatEvent(s, { type: 'approval_required', runId: 'r1', gate: 'spec', summary: '' });
-    return s;
-  };
-
-  it('markDecision 乐观清 pendingApproval 并在该阶段最新一轮气泡记 decision', () => {
-    let s = pendingState();
-    s = markDecision(s, 'spec', true);
-    expect(s.items[0].pendingApproval).toBeNull();
-    expect(s.items[0].decision).toBe('approved');
-  });
-
-  it('markDecision 驳回记 decision=rejected', () => {
-    let s = pendingState();
-    s = markDecision(s, 'spec', false);
-    expect(s.items[0].pendingApproval).toBeNull();
-    expect(s.items[0].decision).toBe('rejected');
-  });
-
-  it('rollbackDecision 恢复 pendingApproval 并清 decision（决策请求失败回滚）', () => {
-    let s = pendingState();
-    s = markDecision(s, 'spec', true);
-    s = rollbackDecision(s, 'spec');
-    expect(s.items[0].pendingApproval).toEqual({ gate: 'spec' });
-    expect(s.items[0].decision).toBeUndefined();
   });
 });
