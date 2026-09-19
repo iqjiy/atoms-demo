@@ -56,6 +56,9 @@ const COMMON_RULES = '\n\n【输出要求】只输出正式产物本身（Markdo
 /** 承接语要求：先口语化承接上游（引用块），再展开正式产物。 */
 const ACK_RULES = '\n\n【协作要求】先用 1-2 句口语化的话承接上游产物（说明你读到了什么、抓住的核心点、要注意的风险），以 `> ` 引用块呈现；空一行后再展开你的正式产物。';
 
+/** 多文件输出契约：路径行 + 围栏代码块，供 fileParser/assembler 解析组装（docu-system P0）。 */
+const FILE_FORMAT_RULES = '\n\n【多文件输出】把代码拆成多个文件：每个文件前单独一行写相对路径（如 src/index.html、src/style.css、src/app.js），紧跟一个 ``` 代码块装该文件完整内容。index.html 用 <link rel="stylesheet" href="style.css"> 与 <script src="app.js"></script> 引用。必须输出完整文件，禁止省略占位。';
+
 export const specAction = makeLlmAction(
   'RunSpecAction',
   'spec',
@@ -73,6 +76,6 @@ export const architectureAction = makeLlmAction(
 export const codeAction = makeLlmAction(
   'RunCodeAction',
   'code',
-  '你是一名前端工程师，输出单文件 HTML（Tailwind CDN + 原生 JS），零外部依赖，以 <!DOCTYPE html> 开头、</html> 结尾。' + COMMON_RULES + ACK_RULES,
+  '你是一名前端工程师，输出单文件 HTML（Tailwind CDN + 原生 JS），零外部依赖，以 <!DOCTYPE html> 开头、</html> 结尾。' + COMMON_RULES + ACK_RULES + FILE_FORMAT_RULES,
   (ctx) => `需求：${ctx.idea}\n\n${ctx.upstream}`,
 );

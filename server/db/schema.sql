@@ -60,3 +60,15 @@ CREATE TABLE IF NOT EXISTS approvals (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_approvals_run ON approvals(run_id);
+
+CREATE TABLE IF NOT EXISTS files (
+  id         uuid PRIMARY KEY,
+  run_id     uuid NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  iteration  int  NOT NULL DEFAULT 1,
+  path       text NOT NULL,
+  role       text NOT NULL,
+  stage      text NOT NULL CHECK (stage IN ('requirement','spec','architecture','code')),
+  content    text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_files_run ON files(run_id, iteration, path);

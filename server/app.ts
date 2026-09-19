@@ -8,6 +8,7 @@ import { streamRouter } from './routes/stream.js';
 import { messagesRouter } from './routes/messages.js';
 import { artifactsRouter } from './routes/artifacts.js';
 import { runStatusRouter } from './routes/runStatus.js';
+import { filesRouter } from './routes/files.js';
 import { OWNER_COOKIE, resolveOwner } from './identity/identityService.js';
 import type { Repos } from './db/repositories/types.js';
 import { createInMemoryRepos } from './db/repositories/memory.js';
@@ -50,6 +51,7 @@ export function createApp(repos: Repos = createInMemoryRepos(), opts: AppOptions
   app.use('/api', messagesRouter(repos));
   app.use('/api', artifactsRouter(repos));
   app.use('/api', runStatusRouter(repos));
+  app.use('/api', filesRouter(repos));
 
   return app;
 }

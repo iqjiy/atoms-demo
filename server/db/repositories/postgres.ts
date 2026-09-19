@@ -4,6 +4,7 @@ import type {
   AgentMessage,
   Artifact,
   Approval,
+  DocFile,
   RunStatus,
   Stage,
 } from '../../../shared-types/index.js';
@@ -32,6 +33,10 @@ const toArtifact = (r: any): Artifact => ({
 const toApproval = (r: any): Approval => ({
   id: r.id, runId: r.run_id, gate: r.gate, decision: r.decision,
   comment: r.comment, iteration: r.iteration, createdAt: r.created_at,
+});
+const toFile = (r: any): DocFile => ({
+  id: r.id, runId: r.run_id, iteration: r.iteration, path: r.path,
+  role: r.role, stage: r.stage, content: r.content, createdAt: r.created_at,
 });
 
 /** Postgres 实现：与内存实现遵守同一契约（repositories.test.ts 同一组断言驱动）。 */
@@ -146,6 +151,22 @@ export function createPostgresRepos(db: Db): Repos {
         const { rows } = await db.query(
           `SELECT * FROM approvals WHERE run_id=$1 ORDER BY created_at ASC`, [runId]);
         return rows.map(toApproval);
+      },
+    },
+
+    files: {
+      async save({ runId, iteration, path, role, stage, content }) {
+        const { rows } = await db.query(
+          `INSERT INTO files (id, run_id, iteration, path, role, stage, content)
+           VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6) RETURNING *`,
+          [runId, iteration, path, role, stage, content],
+        );
+        return toFile(rows[0]);
+      },
+      async listByRun(runId) {
+        const { rows } = await db.query(
+          `SELECT * FROM files WHERE run_id=$1 ORDER BY iteration ASC, path ASC`, [runId]);
+        return rows.map(toFile);
       },
     },
   };

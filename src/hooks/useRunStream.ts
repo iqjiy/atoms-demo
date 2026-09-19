@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { OrchestratorEvent } from '../../server/orchestrator/types.js';
 import { initialChatState, reduceChatEvent, buildReplayState, type ChatState } from '../lib/chatReducer.js';
-import type { AgentMessage, Artifact, Run } from '../../shared-types/index.js';
+import type { AgentMessage, Artifact, DocFile, Run } from '../../shared-types/index.js';
 
 export interface RunHandle {
   runId: string;
@@ -43,6 +43,13 @@ export async function listSessions(): Promise<SessionItem[]> {
   if (!res.ok) throw new Error('加载会话失败');
   const body = (await res.json()) as { projects: Array<{ id: string; title: string; createdAt: string; latestRun: SessionItem['latestRun'] }> };
   return body.projects.map((p) => ({ projectId: p.id, title: p.title, latestRun: p.latestRun, createdAt: p.createdAt }));
+}
+
+/** 拉某 run 的文件树。 */
+export async function listFiles(runId: string): Promise<DocFile[]> {
+  const res = await fetch(`/api/runs/${runId}/files`);
+  if (!res.ok) throw new Error('加载文件失败');
+  return ((await res.json()) as { files: DocFile[] }).files;
 }
 
 /**

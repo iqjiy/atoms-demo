@@ -61,3 +61,15 @@ export interface Approval {
   iteration: number;
   createdAt: string;
 }
+
+export interface DocFile {
+  id: string;
+  runId: string;
+  iteration: number;
+  /** 相对路径，如 pm/spec.md、src/index.html */
+  path: string;
+  role: string;
+  stage: Stage;
+  content: string;
+  createdAt: string;
+}

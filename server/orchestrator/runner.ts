@@ -3,6 +3,8 @@ import { ROLES, type Role } from './roles.js';
 import type { ApprovalGate } from './approvalGate.js';
 import { Checkpointer } from './checkpointer.js';
 import { ensureHtml, injectStorageShim } from './htmlGuard.js';
+import { parseFiles } from './fileParser.js';
+import { assembleHtml } from './assembler.js';
 import type { LlmClient } from '../llm/client.js';
 import type { AgentMessage, NewArtifact, OrchestratorEvent, Stage } from './types.js';
 
@@ -67,12 +69,29 @@ export class Orchestrator {
         }
       }
 
-      // 3) 收尾：取 code 阶段产物，经 htmlGuard 提纯（R3）+ 注入 storage shim（F-01）后落库
-      const codeMsg = [...this.bus.all()].reverse().find((m) => m.stage === 'code');
+      // 3) 收尾：把各角色产物落成文件（pm→/pm、architect→/architect、engineer→/src 多文件），
+      //    工程师多文件经组装器内联为单自包含 HTML 存 artifact（复用 iframe 预览）。
+      const all = [...this.bus.all()];
+      for (const role of ROLES) {
+        const msg = all.filter((m) => m.stage === role.action.stage).pop(); // 该 stage 最新一版
+        if (!msg) continue;
+        const dir = role.name === 'pm' ? 'pm' : role.name === 'architect' ? 'architect' : 'src';
+        const files = role.name === 'engineer'
+          ? parseFiles(msg.content, 'src')
+          : [{ path: `${dir}/${role.name === 'pm' ? 'spec' : 'arch'}.md`, content: msg.content }];
+        const toSave = files.length ? files : [{ path: 'src/index.html', content: msg.content }];
+        await checkpointer.saveFiles(runId, msg.iteration, role.name, role.action.stage, toSave);
+      }
+
+      // 组装预览 HTML：优先工程师多文件组装；组装的/单文件的统一过 ensureHtml
+      // （提取/闭合校验/截断修复/兜底模板），保证预览永不为空且结构完整（review I-1）。
+      const codeMsg = all.filter((m) => m.stage === 'code').pop();
+      const parsed = parseFiles(codeMsg?.content ?? '', 'src');
+      const assembled = parsed.length ? assembleHtml(parsed) : null;
       const artifact: NewArtifact = {
         kind: 'html',
         filename: 'index.html',
-        content: injectStorageShim(ensureHtml(codeMsg?.content ?? '', input.idea)),
+        content: injectStorageShim(ensureHtml(assembled ?? codeMsg?.content ?? '', input.idea)),
       };
       await checkpointer.saveArtifact(runId, artifact);
       await checkpointer.setRunStatus(runId, 'completed', 'code');

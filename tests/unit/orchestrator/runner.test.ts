@@ -115,6 +115,72 @@ describe('Orchestrator 三阶段接力', () => {
     const art = await repos.artifacts.latestByRun(result.runId);
     expect(art?.content).toBe(result.artifact.content);
   });
+
+  it('FINAL-REVIEW I-1: 工程师解析出空 index.html 时，artifact 经 ensureHtml 兜底（非空且可渲染）', async () => {
+    const { repos } = setup();
+    // 模拟：parseFiles 提到 src/index.html 围栏，但内容为空 → assembled === ''
+    const emptyHtmlLlm = new FakeLlmClient();
+    emptyHtmlLlm.complete = async (req) => {
+      if (req.system.includes('工程师')) {
+        return 'src/index.html\n```html\n\n```\n';
+      }
+      return new FakeLlmClient().complete(req);
+    };
+    const orc = new Orchestrator({
+      llm: emptyHtmlLlm,
+      gate: new AutoApproveGate(),
+      checkpointer: new Checkpointer(repos),
+      emit: () => {},
+    });
+    const result = await orc.runProject({ idea: '做一个待办应用' });
+
+    // 关键断言：永不为空 + 是完整可渲染 HTML（fallbackHtml 而非裸 shim）
+    expect(result.artifact.content.length).toBeGreaterThan(0);
+    expect(result.artifact.content).toContain('<html');
+    expect(result.artifact.content).toContain('</html>');
+  });
+
+  it('FINAL-REVIEW I-1: 工程师解析出畸形（截断）index.html 时，artifact 经 ensureHtml 修复闭合', async () => {
+    const { repos } = setup();
+    const truncatedLlm = new FakeLlmClient();
+    truncatedLlm.complete = async (req) => {
+      if (req.system.includes('工程师')) {
+        return 'src/index.html\n```html\n<!DOCTYPE html>\n<html><body><p>截断了\n```\n';
+      }
+      return new FakeLlmClient().complete(req);
+    };
+    const orc = new Orchestrator({
+      llm: truncatedLlm,
+      gate: new AutoApproveGate(),
+      checkpointer: new Checkpointer(repos),
+      emit: () => {},
+    });
+    const result = await orc.runProject({ idea: 'x' });
+
+    expect(result.artifact.content).toContain('<html');
+    expect(result.artifact.content).toContain('</html>');
+  });
+
+  it('docu-system: 每角色产物落成对应文件夹的文件，engineer 组装为单 HTML 预览', async () => {
+    const { repos } = setup();
+    const orc = new Orchestrator({
+      llm: new FakeLlmClient(),
+      gate: new AutoApproveGate(),
+      checkpointer: new Checkpointer(repos),
+      emit: () => {},
+    });
+    const result = await orc.runProject({ idea: '做一个待办应用' });
+
+    const files = await repos.files.listByRun(result.runId);
+    const paths = files.map((f) => f.path);
+    expect(paths).toContain('pm/spec.md');
+    expect(paths).toContain('architect/arch.md');
+    // 工程师至少落一个 src 下的 html
+    expect(paths.some((p) => p.startsWith('src/') && p.endsWith('.html'))).toBe(true);
+    // 预览 artifact 仍是单个自包含 HTML
+    expect(result.artifact.filename).toBe('index.html');
+    expect(result.artifact.content).toContain('<');
+  });
 });
 
 describe('P5 逐级审批闸门（单向向前、驳回只重跑本级）', () => {
