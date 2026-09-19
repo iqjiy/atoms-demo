@@ -29,9 +29,13 @@ interface OrchestratorDeps {
   emit: (e: OrchestratorEvent) => void;
 }
 
+/** P5：单级驳回重跑上限，防无限重跑烧 token（review F-2）。 */
+const MAX_STAGE_ITERATION = 5;
+
 /**
- * 编排器：线性 Pipeline（PM→Architect→Engineer）+ 类型订阅驱动 + 审批闸门 + 每步落库。
+ * 编排器：线性 Pipeline（PM→Architect→Engineer）+ 类型订阅驱动 + 逐级审批闸门 + 每步落库。
  * 接力由 watch 订阅涌现，而非硬编码调用链——新增角色只改 roles.ts。
+ * P5：每级产出后过一道闸门；单向向前、批准即封存；驳回只带意见重跑本级，不回头、不级联下游。
  */
 export class Orchestrator {
   private bus = new MessageBus();
@@ -39,49 +43,82 @@ export class Orchestrator {
 
   async runProject(input: RunInput): Promise<RunResult> {
     const { checkpointer, emit } = this.deps;
-    const iteration = 1;
 
     // 落库：project + run（HTTP 层可预创建后传入 id，避免重复建）
     const projectId = input.projectId
       ?? (await checkpointer.ensureProject(input.ownerId ?? 'anon', input.idea.slice(0, 30), input.idea)).id;
     const runId = input.runId ?? (await checkpointer.ensureRun(projectId)).id;
 
-    // 1) 广播用户需求（等价于 MetaGPT 发布 UserRequirement）
-    await this.publishAndStore({
-      runId, iteration, role: 'coordinator', stage: 'requirement',
-      content: input.idea, causeBy: 'RunRequirementAction',
-    });
+    try {
+      // 1) 广播用户需求（等价于 MetaGPT 发布 UserRequirement）
+      await this.publishAndStore({
+        runId, iteration: 1, role: 'coordinator', stage: 'requirement',
+        content: input.idea, causeBy: 'RunRequirementAction',
+      });
 
-    // 2) 订阅驱动接力
-    for (const role of ROLES) {
-      await this.runRole(role, input.idea, runId, iteration);
-
-      // 3) 人在回路：架构师产出后过审批闸门（P2 默认自动通过）
-      if (role.name === 'architect') {
-        const summary = this.bus.contextFor(['architecture']).slice(0, 200);
-        emit({ type: 'approval_required', runId, gate: 'architecture', summary });
-        const approved = await this.deps.gate.wait(runId, 'architecture');
-        if (!approved) {
-          emit({ type: 'error', stage: 'architecture', message: '用户驳回架构方案', retryable: true });
+      // 2) 订阅驱动接力，每级一道闸门（单向向前）
+      for (const role of ROLES) {
+        const ok = await this.runRoleWithGate(role, input.idea, runId);
+        if (!ok) {
+          // 该级超过迭代上限仍被驳回：发终态 error（让 SSE 收尾）+ 标 failed（review R3/F-1/F-2）
+          emit({ type: 'error', stage: role.action.stage, message: `该阶段修改超过 ${MAX_STAGE_ITERATION} 次仍未通过，已中止`, retryable: false });
+          await checkpointer.setRunStatus(runId, 'failed', role.action.stage);
           return { runId, messages: [...this.bus.all()], artifact: emptyArtifact(), completed: false };
         }
       }
+
+      // 3) 收尾：取 code 阶段产物，经 htmlGuard 提纯（R3）+ 注入 storage shim（F-01）后落库
+      const codeMsg = [...this.bus.all()].reverse().find((m) => m.stage === 'code');
+      const artifact: NewArtifact = {
+        kind: 'html',
+        filename: 'index.html',
+        content: injectStorageShim(ensureHtml(codeMsg?.content ?? '', input.idea)),
+      };
+      await checkpointer.saveArtifact(runId, artifact);
+      await checkpointer.setRunStatus(runId, 'completed', 'code');
+      emit({ type: 'run_done', runId, artifact });
+
+      return { runId, messages: [...this.bus.all()], artifact, completed: true };
+    } catch (err) {
+      // 任何异常（LLM 失败等）：落 failed + error，不留 running（review F-1/F-7）
+      console.error('[orchestrator] runProject failed:', err);
+      await checkpointer.setRunStatus(runId, 'failed', null, String(err));
+      throw err;
     }
-
-    // 4) 收尾：取 code 阶段产物，经 htmlGuard 提纯（R3）+ 注入 storage shim（F-01）后落库
-    const codeMsg = [...this.bus.all()].reverse().find((m) => m.stage === 'code');
-    const artifact: NewArtifact = {
-      kind: 'html',
-      filename: 'index.html',
-      content: injectStorageShim(ensureHtml(codeMsg?.content ?? '', input.idea)),
-    };
-    await checkpointer.saveArtifact(runId, artifact);
-    emit({ type: 'run_done', runId, artifact });
-
-    return { runId, messages: [...this.bus.all()], artifact, completed: true };
   }
 
-  private async runRole(role: Role, idea: string, runId: string, iteration: number): Promise<void> {
+  /** 跑一级 + 过该级闸门：驳回带意见原地重跑本级（iteration+1）；批准返回 true；超上限返回 false。 */
+  private async runRoleWithGate(role: Role, idea: string, runId: string): Promise<boolean> {
+    const gate = role.action.stage;
+    let iteration = 1;
+    let feedback: string | null = null;
+
+    for (;;) {
+      await this.runRole(role, idea, runId, iteration, feedback);
+
+      const summary = this.bus.contextFor([gate]).slice(0, 200);
+      this.deps.emit({ type: 'approval_required', runId, gate, summary });
+      await this.deps.checkpointer.setRunStatus(runId, 'awaiting_approval', gate);
+      const decision = await this.deps.gate.wait(runId, gate);
+      // 落库决策（批准/驳回各一行），沉淀为人类反馈驱动的决策日志
+      await this.deps.checkpointer.recordApproval(runId, gate, decision.approved, decision.comment ?? null, iteration);
+
+      if (decision.approved) {
+        await this.deps.checkpointer.setRunStatus(runId, 'running', gate);
+        return true; // 批准：封存本级，进入下一级
+      }
+      // 驳回：带本轮意见原地重跑本级（单向，不动上下游）；超上限则中止该级
+      if (iteration >= MAX_STAGE_ITERATION) return false;
+      // review R5：重跑期间把状态拉回 running，避免 DB 停留 awaiting_approval 导致重放出假审批卡/决策 410
+      await this.deps.checkpointer.setRunStatus(runId, 'running', gate);
+      feedback = decision.comment ?? null;
+      iteration += 1;
+    }
+  }
+
+  private async runRole(
+    role: Role, idea: string, runId: string, iteration: number, feedback: string | null,
+  ): Promise<void> {
     const { llm, emit } = this.deps;
     emit({ type: 'stage_start', role: role.name, stage: role.action.stage, iteration });
 
@@ -89,6 +126,7 @@ export class Orchestrator {
     const content = await role.action.run({
       idea,
       upstream,
+      feedback,
       llm,
       onToken: (delta) => emit({ type: 'token', role: role.name, stage: role.action.stage, delta }),
     });

@@ -3,9 +3,11 @@ import cookieParser from 'cookie-parser';
 import { healthRouter } from './routes/health.js';
 import { projectsRouter } from './routes/projects.js';
 import { runsRouter } from './routes/runs.js';
+import { decisionRouter } from './routes/decision.js';
 import { streamRouter } from './routes/stream.js';
 import { messagesRouter } from './routes/messages.js';
 import { artifactsRouter } from './routes/artifacts.js';
+import { runStatusRouter } from './routes/runStatus.js';
 import { OWNER_COOKIE, resolveOwner } from './identity/identityService.js';
 import type { Repos } from './db/repositories/types.js';
 import { createInMemoryRepos } from './db/repositories/memory.js';
@@ -43,9 +45,11 @@ export function createApp(repos: Repos = createInMemoryRepos(), opts: AppOptions
   app.use('/api', healthRouter);
   app.use('/api', projectsRouter(repos));
   app.use('/api', runsRouter({ repos, llm, runManager }));
+  app.use('/api', decisionRouter(repos, runManager));
   app.use('/api', streamRouter(repos, runManager));
   app.use('/api', messagesRouter(repos));
   app.use('/api', artifactsRouter(repos));
+  app.use('/api', runStatusRouter(repos));
 
   return app;
 }

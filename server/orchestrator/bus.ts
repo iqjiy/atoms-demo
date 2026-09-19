@@ -28,10 +28,19 @@ export class MessageBus {
     }
   }
 
-  /** 上下文裁剪：只把指定上游阶段的产物喂给下游，防 token 膨胀。 */
+  /**
+   * 上下文裁剪：只把指定上游阶段的产物喂给下游，防 token 膨胀。
+   * 同一阶段若因驳回/迭代重跑而有多版，只取**最新一版**（避免新旧并存喂给下游造成矛盾）。
+   */
   contextFor(stages: Stage[]): string {
-    return this.messages
-      .filter((m) => stages.includes(m.stage))
+    const latestByStage = new Map<Stage, AgentMessage>();
+    for (const m of this.messages) {
+      if (stages.includes(m.stage)) latestByStage.set(m.stage, m); // 后发布覆盖先发布 = 取最新
+    }
+    // 按传入 stages 顺序输出，保证上游在前的稳定阅读顺序
+    return stages
+      .map((s) => latestByStage.get(s))
+      .filter((m): m is AgentMessage => Boolean(m))
       .map((m) => `## [${m.role}/${m.stage}]\n${m.content}`)
       .join('\n\n');
   }

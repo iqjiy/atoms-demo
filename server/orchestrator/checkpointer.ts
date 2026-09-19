@@ -36,4 +36,19 @@ export class Checkpointer {
       content: artifact.content,
     });
   }
+
+  /** P5：落一条审批/迭代决策（批准或驳回，可带意见）。 */
+  async recordApproval(runId: string, gate: string, decision: boolean, comment: string | null, iteration: number) {
+    return this.repos.approvals.record({ runId, gate, decision, comment, iteration });
+  }
+
+  /** P5：更新 run 状态/当前阶段（awaiting_approval / running / completed / failed），可带 error。 */
+  async setRunStatus(
+    runId: string,
+    status: 'running' | 'awaiting_approval' | 'completed' | 'failed',
+    currentStage?: Stage | null,
+    error?: string | null,
+  ) {
+    return this.repos.runs.setStatus(runId, status, currentStage ?? null, error ?? null);
+  }
 }

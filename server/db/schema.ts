@@ -52,7 +52,7 @@ export const SCHEMA_STATEMENTS: string[] = [
   `CREATE TABLE IF NOT EXISTS approvals (
      id uuid PRIMARY KEY,
      run_id uuid NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
-     gate text NOT NULL CHECK (gate IN ('architecture','code')),
+     gate text NOT NULL CHECK (gate IN ('requirement','spec','architecture','code')),
      decision boolean NOT NULL,
      comment text,
      iteration int NOT NULL DEFAULT 1,

@@ -8,6 +8,8 @@ export interface ActionContext {
   /** contextFor 裁剪后的上游产物 */
   upstream: string;
   llm: LlmClient;
+  /** P5：驳回/迭代的修改意见，注入本级重跑 prompt */
+  feedback?: string | null;
   /** token 级回调（P2 Fake 直接一次性给，P3 真实流式） */
   onToken?: (delta: string) => void;
 }
@@ -24,17 +26,21 @@ function makeLlmAction(name: string, stage: Stage, system: string, buildPrompt: 
     name,
     stage,
     async run(ctx) {
+      // P5：驳回/迭代时把修改意见追加进 prompt，驱动本级按意见重跑
+      const prompt = ctx.feedback?.trim()
+        ? `${buildPrompt(ctx)}\n\n【修改意见】上一轮方案被驳回，请按以下意见修改：${ctx.feedback}`
+        : buildPrompt(ctx);
       const runOnce = async () => {
         // 优先 token 级流式（DeepSeek 支持），逐字回调并累积；无 stream 则一次性 complete
         if (ctx.llm.stream) {
           let acc = '';
-          for await (const delta of ctx.llm.stream({ system, prompt: buildPrompt(ctx) })) {
+          for await (const delta of ctx.llm.stream({ system, prompt })) {
             acc += delta;
             ctx.onToken?.(delta);
           }
           return acc;
         }
-        const content = await ctx.llm.complete({ system, prompt: buildPrompt(ctx) });
+        const content = await ctx.llm.complete({ system, prompt });
         ctx.onToken?.(content);
         return content;
       };

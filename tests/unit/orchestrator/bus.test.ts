@@ -73,4 +73,15 @@ describe('MessageBus 上下文裁剪', () => {
     bus.publish(msg('RunSpecAction', 'spec', 's'));
     expect(bus.contextFor([])).toBe('');
   });
+
+  it('同一阶段多次发布（驳回重跑）时，contextFor 只取最新一版', () => {
+    const bus = new MessageBus();
+    bus.publish(msg('RunRequirementAction', 'requirement', '做一个待办应用'));
+    bus.publish(msg('RunSpecAction', 'spec', '规格 v1（被驳回）'));
+    bus.publish(msg('RunSpecAction', 'spec', '规格 v2（修订后）'));
+
+    const ctx = bus.contextFor(['requirement', 'spec']);
+    expect(ctx).toContain('规格 v2（修订后）');
+    expect(ctx).not.toContain('规格 v1（被驳回）');
+  });
 });

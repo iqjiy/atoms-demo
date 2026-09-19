@@ -1,4 +1,5 @@
 import type { OrchestratorEvent } from './types.js';
+import type { GateDecision } from './approvalGate.js';
 
 type Listener = (e: OrchestratorEvent) => void;
 
@@ -10,6 +11,8 @@ type Listener = (e: OrchestratorEvent) => void;
 export class RunManager {
   private active = new Map<string, Set<Listener>>();
   private finished = new Set<string>();
+  /** P5：runId → 挂起的审批决策（resolve + 待审批 gate，review R4/R6）。 */
+  private pendingApprovals = new Map<string, { gate: string; resolve: (d: GateDecision) => void }>();
 
   register(runId: string): void {
     this.active.set(runId, new Set());
@@ -32,9 +35,29 @@ export class RunManager {
   finish(runId: string): void {
     this.active.delete(runId);
     this.finished.add(runId);
+    this.pendingApprovals.delete(runId); // review R6：结束/失败时清理挂起的审批，防泄漏
   }
 
   isActive(runId: string): boolean {
     return this.active.has(runId);
+  }
+
+  /** P5：ManualApprovalGate 挂起时注册 resolve + 待审批 gate，等待 HTTP 决策唤醒。 */
+  registerDecision(runId: string, gate: string, resolve: (d: GateDecision) => void): void {
+    this.pendingApprovals.set(runId, { gate, resolve });
+  }
+
+  /** 当前挂起审批的 gate（无挂起返回 null）。review R4：供决策路由校验决策是否对得上当前闸门。 */
+  pendingGate(runId: string): string | null {
+    return this.pendingApprovals.get(runId)?.gate ?? null;
+  }
+
+  /** P5：HTTP 决策路由调用，唤醒挂起的闸门；无挂起则返回 false。 */
+  resolveDecision(runId: string, decision: GateDecision): boolean {
+    const entry = this.pendingApprovals.get(runId);
+    if (!entry) return false;
+    this.pendingApprovals.delete(runId);
+    entry.resolve(decision);
+    return true;
   }
 }
