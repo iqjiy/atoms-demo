@@ -129,10 +129,15 @@ export class Orchestrator {
     emit({ type: 'stage_start', role: role.name, stage: role.action.stage, iteration });
 
     const upstream = this.bus.contextFor(role.upstreamStages);
+    // 修改2 P-C：驳回轮带上被驳回那一版本级产物（latestOfStage 在本轮重跑前=被驳那版）
+    const prevContent = feedback?.trim()
+      ? this.bus.latestOfStage(role.action.stage)?.content ?? null
+      : null;
     const content = await role.action.run({
       idea,
       upstream,
       feedback,
+      prevContent,
       llm,
       onToken: (delta) => emit({ type: 'token', role: role.name, stage: role.action.stage, delta }),
     });
