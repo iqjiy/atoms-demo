@@ -25,7 +25,8 @@ export function streamRouter(repos: Repos, runManager: RunManager): Router {
 
     const unsub = runManager.subscribe(runId, send);
     if (unsub) {
-      // 活跃运行：实时转发，直到 run_done / error 关闭
+      // 活跃运行：先补发已流出的历史（中途进入不再空白），再实时转发直到 run_done / error 关闭
+      for (const e of runManager.history(runId)) send(e);
       const closer = runManager.subscribe(runId, (e) => {
         if (e.type === 'run_done' || e.type === 'error') {
           res.end();
