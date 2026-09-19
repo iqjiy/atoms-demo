@@ -1,0 +1,189 @@
+import type { OrchestratorEvent, Stage } from '../../server/orchestrator/types.js';
+import type { AgentMessage, Artifact, Run } from '../../shared-types/index.js';
+
+/** 中栏渲染单元：一条聊天气泡（agent 左 / user 右）。 */
+export interface ChatItem {
+  id: string;
+  side: 'agent' | 'user';
+  role?: string;
+  stage?: Stage;
+  iteration: number;
+  text: string;
+  status: 'streaming' | 'done' | 'error';
+  /** 该气泡下方挂审批卡（agent 本级最新一轮且待决策） */
+  pendingApproval?: { gate: string } | null;
+}
+
+export interface ChatState {
+  items: ChatItem[];
+  done: boolean;
+  error: string | null;
+  artifact: { kind: string; filename: string; content: string } | null;
+  /** code 阶段流式累积的 partial HTML（生成中实时预览用；run_done 后被 artifact 取代） */
+  livePreview: string | null;
+}
+
+export function initialChatState(): ChatState {
+  return { items: [], done: false, error: null, artifact: null, livePreview: null };
+}
+
+const bubbleId = (stage: string | undefined, iteration: number, side: string) =>
+  `${side}-${stage ?? 'msg'}-${iteration}`;
+
+/** SSE 事件 → 聊天气泡流（纯函数，便于单测）。 */
+export function reduceChatEvent(state: ChatState, e: OrchestratorEvent): ChatState {
+  switch (e.type) {
+    case 'stage_start': {
+      // 新一轮同阶段 = 新气泡（保留历史轮次）；并清掉上一轮同阶段气泡的待审批标记。
+      // 但若已有同 stage+iteration 的占位气泡（markPendingStart optimistic 产生），复用它而非重复新增。
+      const cleared = state.items.map((it) => (it.stage === e.stage ? { ...it, pendingApproval: null } : it));
+      const existing = cleared.findIndex((it) => it.stage === e.stage && it.iteration === e.iteration);
+      const items = existing >= 0
+        ? cleared.map((it, i) => (i === existing ? { ...it, status: 'streaming' as const, role: e.role } : it))
+        : cleared.concat({
+            id: bubbleId(e.stage, e.iteration, 'agent'),
+            side: 'agent' as const,
+            role: e.role,
+            stage: e.stage,
+            iteration: e.iteration,
+            text: '',
+            status: 'streaming' as const,
+            pendingApproval: null,
+          });
+      return { ...state, items };
+    }
+    case 'token': {
+      const items = state.items.map((it) =>
+        it.stage === e.stage && it.status === 'streaming' ? { ...it, text: it.text + e.delta } : it,
+      );
+      // 生成中预览：仅 code 阶段（工程师产物）的流式 token 累积为 livePreview
+      const livePreview = e.stage === 'code' ? (state.livePreview ?? '') + e.delta : state.livePreview;
+      return { ...state, items, livePreview };
+    }
+    case 'stage_done': {
+      const items = state.items.map((it) =>
+        it.stage === e.message.stage && it.status === 'streaming'
+          ? { ...it, status: 'done' as const, text: e.message.content?.trim() ? e.message.content : it.text }
+          : it,
+      );
+      return { ...state, items };
+    }
+    case 'approval_required': {
+      // 标记该阶段最新一轮（最后一个该 stage）气泡待审批
+      let lastIdx = -1;
+      state.items.forEach((it, i) => { if (it.stage === e.gate) lastIdx = i; });
+      const items = state.items.map((it, i) =>
+        i === lastIdx ? { ...it, pendingApproval: { gate: e.gate } } : it,
+      );
+      return { ...state, items };
+    }
+    case 'run_done': {
+      // 完成：code 气泡收尾，且清掉所有待审批卡（review R2：完成后审批卡不应再可点）
+      const items = state.items.map((it) => ({
+        ...it,
+        pendingApproval: null,
+        ...(it.stage === 'code' && it.status === 'streaming' ? { status: 'done' as const } : {}),
+      }));
+      return { ...state, items, done: true, artifact: e.artifact };
+    }
+    case 'error': {
+      // 出错：清掉所有待审批卡（review R2），标记该阶段错误
+      const items = state.items.map((it) => ({
+        ...it,
+        pendingApproval: null,
+        ...(it.stage === e.stage ? { status: 'error' as const } : {}),
+      }));
+      return { ...state, items, error: e.message };
+    }
+    default:
+      return state;
+  }
+}
+
+/** 底部输入框发的用户消息（壳：仅本地气泡，不触发任何重跑/请求）。 */
+export function appendUserMessage(state: ChatState, text: string): ChatState {
+  const item: ChatItem = {
+    id: `user-${state.items.filter((i) => i.side === 'user').length}-${Date.now()}`,
+    side: 'user',
+    iteration: 0,
+    text,
+    status: 'done',
+    pendingApproval: null,
+  };
+  return { ...state, items: [...state.items, item] };
+}
+
+/**
+ * 提交需求瞬间的 optimistic 渲染（消白屏）：
+ * 立刻出「用户消息(右) + PM 正在输入(左, streaming)」，不等任何网络回包。
+ * 后续真实 stage_start/token 到来时，spec 气泡会被接管更新（同 stage 复用 streaming 气泡）。
+ */
+export function markPendingStart(state: ChatState, idea: string): ChatState {
+  const withUser = appendUserMessage(state, idea);
+  const pmPlaceholder: ChatItem = {
+    id: bubbleId('spec', 1, 'agent'),
+    side: 'agent' as const,
+    role: 'pm',
+    stage: 'spec',
+    iteration: 1,
+    text: '',
+    status: 'streaming' as const,
+    pendingApproval: null,
+  };
+  return { ...withUser, items: [...withUser.items, pmPlaceholder] };
+}
+
+/**
+ * 关页/切换会话重放：由已落库消息 + run 状态重建聊天气泡流。
+ * status=awaiting_approval 时，给当前待决策阶段的最后一条气泡挂审批卡。
+ */
+export function buildReplayState(
+  messages: AgentMessage[],
+  run: Pick<Run, 'status' | 'currentStage'> & Partial<Pick<Run, 'error'>>,
+  artifact: Pick<Artifact, 'kind' | 'filename' | 'content'> | null,
+): ChatState {
+  // requirement（用户原始想法）渲染为右侧用户气泡；agent 阶段渲染为左侧气泡（review C5：不再丢原始想法）
+  const items: ChatItem[] = messages.map((m) =>
+    m.stage === 'requirement'
+      ? {
+          id: bubbleId(m.stage, m.iteration, 'user'),
+          side: 'user' as const,
+          role: m.role,
+          stage: m.stage,
+          iteration: m.iteration,
+          text: m.content,
+          status: 'done' as const,
+          pendingApproval: null,
+        }
+      : {
+          id: bubbleId(m.stage, m.iteration, 'agent'),
+          side: 'agent' as const,
+          role: m.role,
+          stage: m.stage,
+          iteration: m.iteration,
+          text: m.content,
+          status: 'done' as const,
+          pendingApproval: null,
+        },
+  );
+
+  if (run.status === 'awaiting_approval' && run.currentStage) {
+    // 给该阶段最后一轮气泡挂审批卡
+    for (let i = items.length - 1; i >= 0; i--) {
+      if (items[i].stage === run.currentStage) {
+        items[i] = { ...items[i], pendingApproval: { gate: run.currentStage } };
+        break;
+      }
+    }
+  }
+
+  const done = run.status === 'completed';
+  return {
+    items,
+    done,
+    // review C3：优先用 run 落库的真实失败原因，缺省才用通用文案
+    error: run.status === 'failed' ? (run.error ?? '运行失败') : null,
+    artifact: done && artifact ? { kind: artifact.kind, filename: artifact.filename, content: artifact.content } : null,
+    livePreview: null, // 重放场景用已落库 artifact，无需 livePreview
+  };
+}
