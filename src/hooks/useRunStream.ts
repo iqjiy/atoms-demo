@@ -131,10 +131,17 @@ export function useSession(runId: string | null): { state: ChatState; live: bool
  */
 export function mergeReplayWithLive(replayed: ChatState, live: ChatState): ChatState {
   const key = (it: ChatState['items'][number]) => `${it.side}:${it.stage ?? 'msg'}:${it.iteration}`;
+  const replayByKey = new Map(replayed.items.map((it) => [key(it), it]));
   const liveKeys = new Map(live.items.map((it) => [key(it), it]));
   // 重放气泡：仅保留 live 未覆盖的（历史）；live 气泡：全部（含更新/新增/流式）
   const historical = replayed.items.filter((it) => !liveKeys.has(key(it)));
-  const items = [...historical, ...live.items];
+  // 兜底：同 key 时若 replayed 已 done 且 text 更长（live 还在空/流式早期），用 replayed 完整版，防空气泡盖完整气泡
+  const liveResolved = live.items.map((it) => {
+    const r = replayByKey.get(key(it));
+    if (r && r.status === 'done' && r.text.length > it.text.length) return r;
+    return it;
+  });
+  const items = [...historical, ...liveResolved];
   return {
     items,
     done: live.done || replayed.done,
