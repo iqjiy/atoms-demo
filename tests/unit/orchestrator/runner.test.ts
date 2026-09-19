@@ -115,6 +115,27 @@ describe('Orchestrator 三阶段接力', () => {
     const art = await repos.artifacts.latestByRun(result.runId);
     expect(art?.content).toBe(result.artifact.content);
   });
+
+  it('docu-system: 每角色产物落成对应文件夹的文件，engineer 组装为单 HTML 预览', async () => {
+    const { repos } = setup();
+    const orc = new Orchestrator({
+      llm: new FakeLlmClient(),
+      gate: new AutoApproveGate(),
+      checkpointer: new Checkpointer(repos),
+      emit: () => {},
+    });
+    const result = await orc.runProject({ idea: '做一个待办应用' });
+
+    const files = await repos.files.listByRun(result.runId);
+    const paths = files.map((f) => f.path);
+    expect(paths).toContain('pm/spec.md');
+    expect(paths).toContain('architect/arch.md');
+    // 工程师至少落一个 src 下的 html
+    expect(paths.some((p) => p.startsWith('src/') && p.endsWith('.html'))).toBe(true);
+    // 预览 artifact 仍是单个自包含 HTML
+    expect(result.artifact.filename).toBe('index.html');
+    expect(result.artifact.content).toContain('<');
+  });
 });
 
 describe('P5 逐级审批闸门（单向向前、驳回只重跑本级）', () => {

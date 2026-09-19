@@ -37,6 +37,11 @@ export class Checkpointer {
     });
   }
 
+  /** docu-system：把某角色本轮的一组文件落库（path→content）。 */
+  async saveFiles(runId: string, iteration: number, role: string, stage: Stage, files: Array<{ path: string; content: string }>) {
+    return Promise.all(files.map((f) => this.repos.files.save({ runId, iteration, path: f.path, role, stage, content: f.content })));
+  }
+
   /** P5：落一条审批/迭代决策（批准或驳回，可带意见）。 */
   async recordApproval(runId: string, gate: string, decision: boolean, comment: string | null, iteration: number) {
     return this.repos.approvals.record({ runId, gate, decision, comment, iteration });
