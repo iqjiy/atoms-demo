@@ -23,10 +23,12 @@ export interface ChatState {
   livePreview: string | null;
   /** 各阶段开始时间戳（进度条计时用）：首次 stage_start 时记录，不随 iteration 重置 */
   stageStarts: Partial<Record<Stage, number>>;
+  /** files_saved 事件的轻量计数信号：App 依赖其变化增量重拉文件树 */
+  filesVersion: number;
 }
 
 export function initialChatState(): ChatState {
-  return { items: [], done: false, error: null, artifact: null, livePreview: null, stageStarts: {} };
+  return { items: [], done: false, error: null, artifact: null, livePreview: null, stageStarts: {}, filesVersion: 0 };
 }
 
 const bubbleId = (stage: string | undefined, iteration: number, side: string) =>
@@ -91,6 +93,14 @@ export function reduceChatEvent(state: ChatState, e: OrchestratorEvent): ChatSta
         ...(it.stage === 'code' && it.status === 'streaming' ? { status: 'done' as const } : {}),
       }));
       return { ...state, items, done: true, artifact: e.artifact };
+    }
+    case 'artifact_ready': {
+      // 工程师 code 完成 → 预览产物提前就绪（不等 run_done），预览按钮即刻变绿
+      return { ...state, artifact: e.artifact };
+    }
+    case 'files_saved': {
+      // 某阶段通过审批 → 其文件落盘，递增计数信号供 App 增量重拉文件树
+      return { ...state, filesVersion: state.filesVersion + 1 };
     }
     case 'error': {
       // 出错：清掉所有待审批卡（review R2），标记该阶段错误
@@ -232,5 +242,6 @@ export function buildReplayState(
     artifact: done && artifact ? { kind: artifact.kind, filename: artifact.filename, content: artifact.content } : null,
     livePreview: null, // 重放场景用已落库 artifact，无需 livePreview
     stageStarts,
+    filesVersion: 0,
   };
 }

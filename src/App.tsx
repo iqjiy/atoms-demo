@@ -86,20 +86,20 @@ export default function App() {
     if (baseState.items.length > 0) setPendingStart(null);
   }, [baseState.items.length]);
 
-  // run 完成 / 会话切换后拉文件树
+  // run 完成 / 会话切换 / files_saved（某阶段通过落盘）后拉文件树
   useEffect(() => {
     if (!runId) {
       setFiles([]);
       setActiveFile(null);
       return;
     }
-    if (!baseState.done) return;
+    if (!state.done && state.filesVersion === 0) return;
     let cancelled = false;
     listFiles(runId)
       .then((fs) => { if (!cancelled) setFiles(fs); })
       .catch(() => { /* 忽略文件加载失败 */ });
     return () => { cancelled = true; };
-  }, [runId, baseState.done]);
+  }, [runId, state.done, state.filesVersion]);
 
   const handleNew = () => {
     setActive(null);

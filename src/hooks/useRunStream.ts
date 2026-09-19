@@ -151,5 +151,7 @@ export function mergeReplayWithLive(replayed: ChatState, live: ChatState): ChatS
     livePreview: live.livePreview ?? replayed.livePreview,
     // stageStarts：live 优先（含实时计时），replay 兜底（历史会话）
     stageStarts: { ...replayed.stageStarts, ...live.stageStarts },
+    // filesVersion：取两侧较大者，保持单调递增（files_saved 增量刷新文件树）
+    filesVersion: Math.max(live.filesVersion, replayed.filesVersion),
   };
 }

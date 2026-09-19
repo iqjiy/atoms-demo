@@ -257,6 +257,19 @@ describe('stageStarts：阶段计时起点（PM timer fix）', () => {
   });
 });
 
+describe('问题2-T5：新事件归约（artifact_ready / files_saved）', () => {
+  it('artifact_ready 置 artifact 但不置 done（预览提前于 run 完成）', () => {
+    const s = reduceChatEvent(initialChatState(), { type: 'artifact_ready', runId: 'r', artifact: { kind: 'html', filename: 'index.html', content: '<html/>' } } as any);
+    expect(s.artifact?.content).toBe('<html/>');
+    expect(s.done).toBe(false);
+  });
+
+  it('files_saved 递增 filesVersion（供前端重拉文件树）', () => {
+    const s = reduceChatEvent(initialChatState(), { type: 'files_saved', runId: 'r', stage: 'spec' } as any);
+    expect(s.filesVersion).toBe(1);
+  });
+});
+
 describe('code-review 修复（C5）', () => {
   it('重放保留 requirement 为用户气泡（右），不丢原始想法', () => {
     const messages = [
