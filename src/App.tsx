@@ -29,6 +29,8 @@ export default function App() {
   const [userMessages, setUserMessages] = useState<string[]>([]);
   /** 提交瞬间的 optimistic 占位（消白屏）：拿到 runId 前显示「用户消息 + PM 正在输入」 */
   const [pendingStart, setPendingStart] = useState<ChatState | null>(null);
+  /** 通过/驳回的乐观决策叠加（修改1A）：gate → 该阶段最新一轮的 decision；下一轮 stage_start 后由 reducer 清审批卡，叠加随 baseState 更新自然失效 */
+  const [decisions, setDecisions] = useState<Record<string, 'approved' | 'rejected'>>({});
   /** 预览全屏（Fullscreen API） */
   const [isFullscreen, setIsFullscreen] = useState(false);
   const previewSectionRef = useRef<HTMLElement | null>(null);
@@ -55,8 +57,26 @@ export default function App() {
   const { state: baseState, progress } = useSession(runId);
   // 叠加底部输入框的「壳」用户消息（纯展示，不触发重跑）
   const withUser = userMessages.reduce((s, m) => appendUserMessage(s, m), baseState);
+  // 修改1A：叠加乐观决策条——该 stage 最新一轮产物气泡清审批卡 + 记 decision，实现「点完立即出反馈条」；
+  // 下一轮 stage_start（reducer 层）后 baseState 已清 pendingApproval，此处叠加无副作用
+  const withDecisions = (() => {
+    const gates = Object.keys(decisions);
+    if (gates.length === 0) return withUser;
+    // 每个 gate 找最新一轮产物气泡下标（跳过 feedback 旁白）
+    const lastIdxByGate = new Map<string, number>();
+    withUser.items.forEach((it, i) => {
+      if (it.stage && decisions[it.stage] && it.kind !== 'feedback') lastIdxByGate.set(it.stage, i);
+    });
+    return {
+      ...withUser,
+      items: withUser.items.map((it, i) => {
+        const d = it.stage && lastIdxByGate.get(it.stage) === i ? decisions[it.stage] : undefined;
+        return d ? { ...it, pendingApproval: null, decision: d } : it;
+      }),
+    };
+  })();
   // 提交后、runId 未就位时用 optimistic 占位；一旦有真实数据则切换
-  const state = pendingStart && baseState.items.length === 0 ? pendingStart : withUser;
+  const state = pendingStart && baseState.items.length === 0 ? pendingStart : withDecisions;
   // pendingStart 期间 progress 为空，合成「PM 进行中」让进度条立刻亮起
   const displayProgress = pendingStart && baseState.items.length === 0
     ? { current: 'spec' as Stage, doneStages: [] as Stage[], running: true }
@@ -143,9 +163,13 @@ export default function App() {
   const handleDecide = async (gate: string, approved: boolean, comment?: string) => {
     if (!runId) return;
     setDeciding(true);
+    // 修改1A：乐观出「✓ 已通过 / ✕ 已驳回」条（decision 叠加在气泡上，立即反馈）
+    setDecisions((d) => ({ ...d, [gate]: approved ? 'approved' : 'rejected' }));
     try {
       await postDecision(runId, gate, approved, comment);
     } catch (e) {
+      // 回滚：撤掉乐观条，审批卡仍在（baseState 未变）并提示
+      setDecisions((d) => { const { [gate]: _dropped, ...rest } = d; return rest; });
       alert(String(e));
     } finally {
       setDeciding(false);

@@ -12,6 +12,10 @@ export interface ChatItem {
   status: 'streaming' | 'done' | 'error';
   /** 该气泡下方挂审批卡（agent 本级最新一轮且待决策） */
   pendingApproval?: { gate: string } | null;
+  /** 驳回意见气泡（reviewer 旁白），渲染为警示条而非普通产物气泡 */
+  kind?: 'feedback';
+  /** 该阶段已通过/驳回的乐观决策标记（点通过/驳回立即反馈，不等下一级 stage_start） */
+  decision?: 'approved' | 'rejected';
 }
 
 export interface ChatState {
@@ -69,6 +73,23 @@ export function reduceChatEvent(state: ChatState, e: OrchestratorEvent): ChatSta
       return { ...state, items, livePreview };
     }
     case 'stage_done': {
+      // 修改1B：驳回意见（reviewer 旁白）作为独立 feedback 气泡插入，
+      // 不走「按 stage 收尾 streaming 产物气泡」的逻辑（否则意见会覆盖产物文本）。
+      if (e.message.causeBy === 'ReviewFeedback') {
+        const feedback: ChatItem = {
+          // id 不与产物气泡（bubbleId = side-stage-iteration）碰撞
+          id: `${e.message.stage}-${e.message.iteration}-feedback-${e.message.id}`,
+          side: 'agent',
+          role: 'reviewer',
+          kind: 'feedback',
+          stage: e.message.stage,
+          iteration: e.message.iteration,
+          text: e.message.content,
+          status: 'done',
+          pendingApproval: null,
+        };
+        return { ...state, items: [...state.items, feedback] };
+      }
       const items = state.items.map((it) =>
         it.stage === e.message.stage && it.status === 'streaming'
           ? { ...it, status: 'done' as const, text: e.message.content?.trim() ? e.message.content : it.text }
@@ -77,9 +98,9 @@ export function reduceChatEvent(state: ChatState, e: OrchestratorEvent): ChatSta
       return { ...state, items };
     }
     case 'approval_required': {
-      // 标记该阶段最新一轮（最后一个该 stage）气泡待审批
+      // 标记该阶段最新一轮（最后一个该 stage 的产物气泡）待审批；跳过 feedback 旁白气泡
       let lastIdx = -1;
-      state.items.forEach((it, i) => { if (it.stage === e.gate) lastIdx = i; });
+      state.items.forEach((it, i) => { if (it.stage === e.gate && it.kind !== 'feedback') lastIdx = i; });
       const items = state.items.map((it, i) =>
         i === lastIdx ? { ...it, pendingApproval: { gate: e.gate } } : it,
       );
@@ -166,6 +187,7 @@ export function stageProgress(state: ChatState): {
   const latestByStage = new Map<Stage, ChatItem>();
   for (const it of state.items) {
     if (!it.stage || !PROGRESS_STAGES.includes(it.stage)) continue;
+    if (it.kind === 'feedback') continue; // 驳回意见旁白不参与阶段进度判定
     const prev = latestByStage.get(it.stage);
     if (!prev || it.iteration >= prev.iteration) latestByStage.set(it.stage, it);
   }
@@ -180,6 +202,32 @@ export function stageProgress(state: ChatState): {
 }
 
 /**
+ * 点「通过/驳回」瞬间的乐观更新（本地动作，非 SSE）：
+ * 立刻清该阶段审批卡并在最新一轮气泡记 decision，渲染「✓ 已通过 / ✕ 已驳回」条，
+ * 不等 postDecision 回包、也不等下一级 stage_start。
+ */
+export function markDecision(state: ChatState, gate: string, approved: boolean): ChatState {
+  let lastIdx = -1;
+  state.items.forEach((it, i) => { if (it.stage === gate && it.kind !== 'feedback') lastIdx = i; });
+  const items = state.items.map((it, i) =>
+    i === lastIdx ? { ...it, pendingApproval: null, decision: approved ? 'approved' as const : 'rejected' as const } : it,
+  );
+  return { ...state, items };
+}
+
+/** postDecision 失败时回滚 markDecision：恢复该阶段最新一轮的审批卡，清 decision 标记。 */
+export function rollbackDecision(state: ChatState, gate: string): ChatState {
+  let lastIdx = -1;
+  state.items.forEach((it, i) => { if (it.stage === gate && it.kind !== 'feedback') lastIdx = i; });
+  const items = state.items.map((it, i) => {
+    if (i !== lastIdx) return it;
+    const { decision: _dropped, ...rest } = it;
+    return { ...rest, pendingApproval: { gate } };
+  });
+  return { ...state, items };
+}
+
+/**
  * 关页/切换会话重放：由已落库消息 + run 状态重建聊天气泡流。
  * status=awaiting_approval 时，给当前待决策阶段的最后一条气泡挂审批卡。
  */
@@ -188,10 +236,23 @@ export function buildReplayState(
   run: Pick<Run, 'status' | 'currentStage'> & Partial<Pick<Run, 'error'>>,
   artifact: Pick<Artifact, 'kind' | 'filename' | 'content'> | null,
 ): ChatState {
-  // requirement（用户原始想法）渲染为右侧用户气泡；agent 阶段渲染为左侧气泡（review C5：不再丢原始想法）
+  // requirement（用户原始想法）渲染为右侧用户气泡；agent 阶段渲染为左侧气泡（review C5：不再丢原始想法）；
+  // causeBy==='ReviewFeedback' 的落库消息重建为驳回意见气泡（修改1B：关页重放仍可见意见，夹在 被驳气泡 与 重跑气泡 之间）
   const items: ChatItem[] = messages.map((m) =>
-    m.stage === 'requirement'
+    m.causeBy === 'ReviewFeedback'
       ? {
+          id: `${m.stage}-${m.iteration}-feedback-${m.id}`,
+          side: 'agent' as const,
+          role: m.role,
+          kind: 'feedback' as const,
+          stage: m.stage,
+          iteration: m.iteration,
+          text: m.content,
+          status: 'done' as const,
+          pendingApproval: null,
+        }
+      : m.stage === 'requirement'
+        ? {
           id: bubbleId(m.stage, m.iteration, 'user'),
           side: 'user' as const,
           role: m.role,
@@ -214,9 +275,9 @@ export function buildReplayState(
   );
 
   if (run.status === 'awaiting_approval' && run.currentStage) {
-    // 给该阶段最后一轮气泡挂审批卡
+    // 给该阶段最后一轮产物气泡挂审批卡（跳过 feedback 旁白气泡）
     for (let i = items.length - 1; i >= 0; i--) {
-      if (items[i].stage === run.currentStage) {
+      if (items[i].stage === run.currentStage && items[i].kind !== 'feedback') {
         items[i] = { ...items[i], pendingApproval: { gate: run.currentStage } };
         break;
       }

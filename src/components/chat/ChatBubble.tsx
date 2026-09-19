@@ -7,6 +7,7 @@ const ROLE_LABEL: Record<string, string> = {
   architect: '架构师',
   engineer: '工程师',
   coordinator: '协调',
+  reviewer: '审批意见',
 };
 
 /** 流式渲染节流：每 ~120ms 渲一帧，避免每 token 全量重渲染（F-05 O(n²) 教训）。 */
@@ -31,6 +32,18 @@ export default function ChatBubble({ item }: { item: ChatItem }) {
     return (
       <div className="flex justify-end">
         <div className="max-w-[80%] rounded-2xl rounded-br-sm bg-slate-900 px-3 py-2 text-sm text-white">
+          {item.text}
+        </div>
+      </div>
+    );
+  }
+
+  // 修改1B：驳回意见渲染为警示条（🚫 驳回意见 · 第 N 轮），区别于普通产物气泡
+  if (item.kind === 'feedback') {
+    return (
+      <div className="flex justify-start">
+        <div className="max-w-[85%] rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+          <span className="font-medium">🚫 驳回意见 · 第 {item.iteration} 轮：</span>
           {item.text}
         </div>
       </div>
@@ -76,6 +89,17 @@ function AgentBubble({ item }: { item: ChatItem }) {
             </div>
           )}
         </div>
+        {/* 修改1A：点通过/驳回后的即时反馈条（乐观更新，不等下一级 stage_start） */}
+        {item.decision === 'approved' && (
+          <div className="mt-1 rounded-md border border-green-200 bg-green-50 px-2 py-1 text-xs text-green-700">
+            ✓ 已通过 · 第 {item.iteration} 轮
+          </div>
+        )}
+        {item.decision === 'rejected' && (
+          <div className="mt-1 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700">
+            ✕ 已驳回 · 第 {item.iteration} 轮
+          </div>
+        )}
       </div>
     </div>
   );
