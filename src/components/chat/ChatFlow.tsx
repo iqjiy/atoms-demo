@@ -1,5 +1,5 @@
 import type { ChatState, stageProgress } from '../../lib/chatReducer.js';
-import type { Stage } from '../../../server/orchestrator/types.js';
+import type { Stage } from '../../../shared-types/index.js';
 import ChatBubble from './ChatBubble.js';
 import ApprovalCard from './ApprovalCard.js';
 import StageProgress from './StageProgress.js';

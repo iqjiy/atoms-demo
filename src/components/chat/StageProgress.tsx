@@ -1,4 +1,4 @@
-import type { Stage } from '../../../server/orchestrator/types.js';
+import type { Stage } from '../../../shared-types/index.js';
 import type { stageProgress } from '../../lib/chatReducer.js';
 import { useElapsed } from '../../hooks/useElapsed.js';
 

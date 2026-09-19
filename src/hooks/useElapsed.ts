@@ -17,7 +17,12 @@ export function useElapsed(start: number | null, running: boolean): string {
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
-    if (start === null || !running) return;
+    if (start === null) return;
+    if (!running) {
+      // 定格：running true→false 切换瞬间取一次完成时刻，避免定格值比真实耗时少 ~1s。
+      setNow(Date.now());
+      return;
+    }
     setNow(Date.now()); // 阶段切换瞬间立即刷新一次，避免闪烁旧值
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
