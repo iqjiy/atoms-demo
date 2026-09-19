@@ -5,6 +5,7 @@ import type {
   AgentMessage,
   Artifact,
   Approval,
+  DocFile,
   RunStatus,
   Stage,
 } from '../../../shared-types/index.js';
@@ -26,6 +27,7 @@ export function createInMemoryRepos(): Repos {
   const messages = new Map<string, AgentMessage>();
   const artifacts = new Map<string, Artifact>();
   const approvals = new Map<string, Approval>();
+  const files = new Map<string, DocFile>();
 
   return {
     projects: {
@@ -158,6 +160,19 @@ export function createInMemoryRepos(): Repos {
         return [...approvals.values()]
           .filter((a) => a.runId === runId)
           .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      },
+    },
+
+    files: {
+      async save({ runId, iteration, path, role, stage, content }) {
+        const f: DocFile = { id: randomUUID(), runId, iteration, path, role, stage, content, createdAt: monoNow() };
+        files.set(f.id, f);
+        return f;
+      },
+      async listByRun(runId) {
+        return [...files.values()]
+          .filter((f) => f.runId === runId)
+          .sort((a, b) => a.iteration - b.iteration || a.path.localeCompare(b.path));
       },
     },
   };

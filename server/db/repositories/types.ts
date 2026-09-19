@@ -4,6 +4,7 @@ import type {
   AgentMessage,
   Artifact,
   Approval,
+  DocFile,
   RunStatus,
   Stage,
 } from '../../../shared-types/index.js';
@@ -46,10 +47,16 @@ export interface ApprovalRepository {
   listByRun(runId: string): Promise<Approval[]>;
 }
 
+export interface FilesRepository {
+  save(input: { runId: string; iteration: number; path: string; role: string; stage: Stage; content: string }): Promise<DocFile>;
+  listByRun(runId: string): Promise<DocFile[]>;
+}
+
 export interface Repos {
   projects: ProjectRepository;
   runs: RunRepository;
   messages: MessageRepository;
   artifacts: ArtifactRepository;
   approvals: ApprovalRepository;
+  files: FilesRepository;
 }
