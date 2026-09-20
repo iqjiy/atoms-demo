@@ -109,12 +109,15 @@ export default function App() {
   }, [runId]);
 
   // run 完成 / 会话切换 / files_saved（某阶段通过落盘）后拉文件树
+  // runId 变化（含切换到无文件的进行中会话）时先清空，再看 done/filesVersion 决定是否拉取——
+  // 否则旧会话的文件树会残留到新会话（code-review 发现 #1）。
   useEffect(() => {
-    if (!runId) {
-      setFiles([]);
-      setActiveFile(null);
-      return;
-    }
+    setFiles([]);
+    setActiveFile(null);
+  }, [runId]);
+
+  useEffect(() => {
+    if (!runId) return; // 清空已由上面的 runId effect 处理
     if (!state.done && state.filesVersion === 0) return;
     let cancelled = false;
     listFiles(runId)

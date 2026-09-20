@@ -104,8 +104,9 @@ export class Orchestrator {
         // 问题2：通过才落文件（被驳回的中间版不落盘）。每级通过分别落：pm→/pm、architect→/architect、engineer→/src。
         const msg = this.bus.latestOfStage(role.action.stage);
         if (msg) {
+          const parsed = role.name === 'engineer' ? parseFiles(msg.content, 'src') : [];
           const files = role.name === 'engineer'
-            ? (parseFiles(msg.content, 'src').length ? parseFiles(msg.content, 'src') : [{ path: 'src/index.html', content: msg.content }])
+            ? (parsed.length ? parsed : [{ path: 'src/index.html', content: msg.content }])
             : [{ path: role.name === 'pm' ? 'pm/spec.md' : 'architect/arch.md', content: msg.content }];
           await this.deps.checkpointer.saveFiles(runId, msg.iteration, role.name, role.action.stage, files);
           this.deps.emit({ type: 'files_saved', runId, stage: role.action.stage });
