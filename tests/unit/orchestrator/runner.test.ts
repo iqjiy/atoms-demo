@@ -443,6 +443,85 @@ describe('P5 逐级审批闸门（单向向前、驳回只重跑本级）', () =
   });
 });
 
+describe('问题6-T2: runner 预览直接用单文件原文 + 通过落盘单 src/index.html', () => {
+  it('自包含单文件工程师输出 → 预览=ensureHtml(原文)提纯, 落盘仅 src/index.html', async () => {
+    const { repos } = setup();
+    // 工程师产一个自包含 html（裸输出，无文件路径围栏拆分）
+    const selfContained =
+      '<!DOCTYPE html>\n<html><head><style>body{background:#abc}</style></head>' +
+      '<body><button id="x">go</button>' +
+      '<script>document.getElementById("x").onclick=()=>console.log("MARK-INLINE")</script>' +
+      '</body></html>';
+    const llm = new FakeLlmClient();
+    llm.complete = async (req) => {
+      if (req.system.includes('工程师')) return selfContained;
+      return new FakeLlmClient().complete(req);
+    };
+    const orc = new Orchestrator({
+      llm,
+      gate: new AutoApproveGate(),
+      checkpointer: new Checkpointer(repos),
+      emit: () => {},
+    });
+    const result = await orc.runProject({ idea: '做一个自包含小游戏' });
+
+    // 1) 预览 artifact 含原文标志性内容（内联 style + 内联 script 标识），证明走了 ensureHtml(原文)
+    expect(result.artifact.content).toContain('body{background:#abc}');
+    expect(result.artifact.content).toContain('MARK-INLINE');
+    // 提纯后完整可渲染
+    expect(result.artifact.content).toContain('<html');
+    expect(result.artifact.content).toContain('</html>');
+    // 落库一致
+    const art = await repos.artifacts.latestByRun(result.runId);
+    expect(art?.content).toBe(result.artifact.content);
+
+    // 2) 通过落盘：src 下只有且仅有 src/index.html 一个文件，content 为工程师原文
+    const files = await repos.files.listByRun(result.runId);
+    const srcFiles = files.filter((f) => f.path.startsWith('src/'));
+    expect(srcFiles).toHaveLength(1);
+    expect(srcFiles[0].path).toBe('src/index.html');
+    expect(srcFiles[0].content).toBe(selfContained);
+  });
+
+  it('工程师输出含多文件围栏也不拆分：落盘仍是单 src/index.html（原文整体）', async () => {
+    const { repos } = setup();
+    // 输出带「路径行+围栏」的多文件片段——旧 runner 会 parseFiles 拆成多个 src/*；新 runner 不再拆
+    const multiFence = [
+      'src/index.html',
+      '```html',
+      '<!DOCTYPE html><html><body><p>app</p></body></html>',
+      '```',
+      'src/app.js',
+      '```js',
+      'console.log("SPLIT-APP")',
+      '```',
+    ].join('\n');
+    const llm = new FakeLlmClient();
+    llm.complete = async (req) => {
+      if (req.system.includes('工程师')) return multiFence;
+      return new FakeLlmClient().complete(req);
+    };
+    const orc = new Orchestrator({
+      llm,
+      gate: new AutoApproveGate(),
+      checkpointer: new Checkpointer(repos),
+      emit: () => {},
+    });
+    const result = await orc.runProject({ idea: 'x' });
+
+    // 落盘：src 下只有 src/index.html，且 content === 工程师完整原文（未被拆分）
+    const files = await repos.files.listByRun(result.runId);
+    const srcFiles = files.filter((f) => f.path.startsWith('src/'));
+    expect(srcFiles).toHaveLength(1);
+    expect(srcFiles[0].path).toBe('src/index.html');
+    expect(srcFiles[0].content).toBe(multiFence);
+    // 不再产生 src/app.js
+    expect(files.some((f) => f.path === 'src/app.js')).toBe(false);
+    // 预览仍非空可渲染
+    expect(result.artifact.content).toContain('<html');
+  });
+});
+
 describe('P5 run 状态生命周期与迭代上限', () => {
   it('全部批准后 runs 状态落 completed（不留 running）', async () => {
     const { repos } = setup();

@@ -3,8 +3,6 @@ import { ROLES, type Role } from './roles.js';
 import type { ApprovalGate } from './approvalGate.js';
 import { Checkpointer } from './checkpointer.js';
 import { ensureHtml, injectStorageShim } from './htmlGuard.js';
-import { parseFiles } from './fileParser.js';
-import { assembleHtml } from './assembler.js';
 import type { LlmClient } from '../llm/client.js';
 import type { AgentMessage, NewArtifact, OrchestratorEvent, Stage } from './types.js';
 
@@ -102,11 +100,11 @@ export class Orchestrator {
 
       if (decision.approved) {
         // 问题2：通过才落文件（被驳回的中间版不落盘）。每级通过分别落：pm→/pm、architect→/architect、engineer→/src。
+        // 问题6-T2：工程师落盘为单文件自包含 src/index.html（content=工程师原文），不再 parseFiles 拆分。
         const msg = this.bus.latestOfStage(role.action.stage);
         if (msg) {
-          const parsed = role.name === 'engineer' ? parseFiles(msg.content, 'src') : [];
           const files = role.name === 'engineer'
-            ? (parsed.length ? parsed : [{ path: 'src/index.html', content: msg.content }])
+            ? [{ path: 'src/index.html', content: msg.content }]
             : [{ path: role.name === 'pm' ? 'pm/spec.md' : 'architect/arch.md', content: msg.content }];
           await this.deps.checkpointer.saveFiles(runId, msg.iteration, role.name, role.action.stage, files);
           this.deps.emit({ type: 'files_saved', runId, stage: role.action.stage });
@@ -159,14 +157,13 @@ export class Orchestrator {
     });
     emit({ type: 'stage_done', message });
 
-    // 问题2：工程师 code 一完成即组装+落 artifact + emit artifact_ready（预览立即可用，供审核评判；不等整 run 收尾）。
-    // 预览永不为空：parseFiles 空→单文件 ensureHtml；assembleHtml null→ensureHtml 兜底（含空/截断修复）。
+    // 问题6-T2：工程师 code 一完成即落 artifact + emit artifact_ready（预览立即可用，供审核评判）。
+    // 预览永可运行：直接用工程师单文件自包含原文，ensureHtml 提纯 + storage shim，不再 parseFiles/assembleHtml。
     if (role.name === 'engineer') {
-      const parsed = parseFiles(message.content, 'src');
-      const assembled = parsed.length ? assembleHtml(parsed) : null;
+      const html = ensureHtml(message.content, idea);
       const artifact: NewArtifact = {
         kind: 'html', filename: 'index.html',
-        content: injectStorageShim(ensureHtml(assembled ?? message.content, idea)),
+        content: injectStorageShim(html),
       };
       await this.deps.checkpointer.saveArtifact(runId, artifact);
       emit({ type: 'artifact_ready', runId, artifact });

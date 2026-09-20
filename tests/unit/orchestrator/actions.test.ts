@@ -24,14 +24,24 @@ describe('协作身份 prompt（修改2 P-A）', () => {
     expect(codeSystem).toContain('需要我');
   });
 
-  it('工程师仍保留多文件输出契约', () => {
-    expect(codeSystem).toContain('多文件输出');
+  it('工程师 prompt 要求单个自包含 index.html（不再要求多文件拆分）', () => {
+    expect(codeSystem).toContain('自包含');
+    expect(codeSystem).not.toContain('多文件');   // 双份契约已删
+    expect(codeSystem).not.toContain('style.css');  // 不再引导拆 css
   });
 
   it('工程师 prompt 禁止使用 ES module（防止组装后 import 报错致按钮失效）', () => {
     expect(codeSystem).toContain('禁止使用 ES module');
     expect(codeSystem).toContain('import/export');
     expect(codeSystem).toContain('type="module"');
+  });
+
+  it('工程师 prompt 要求 index.html 自包含（内联 css/js、零本地依赖、完整不省略）', () => {
+    expect(codeSystem).toContain('自包含');
+    expect(codeSystem).toContain('内联');
+    expect(codeSystem).toContain('<style>');
+    expect(codeSystem).toContain('<script>');
+    expect(codeSystem).toContain('完整');
   });
 
   it('驳回轮：prompt 含上一轮产物+修改意见，system 用修订要求(无承接模板)', async () => {

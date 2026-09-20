@@ -26,7 +26,7 @@ export class DeepSeekClient implements LlmClient {
     return {
       model: this.opts.model,
       stream,
-      max_tokens: req.maxTokens ?? 8192,
+      max_tokens: req.maxTokens ?? 16384,
       // 生成代码无需推理思考；关闭以避免 token 全耗在 reasoning_content 导致 content 为空
       thinking: { type: 'disabled' },
       messages: [
