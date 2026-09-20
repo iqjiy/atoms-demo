@@ -64,7 +64,7 @@ const COLLAB_IDENTITY = '\n\n【你的工作背景】你是一个「想法→应
 const COMMON_RULES = '\n\n【输出要求】只输出正式产物本身（Markdown 格式），不客套、结尾不反问。';
 
 /** 多文件输出契约：路径行 + 围栏代码块，供 fileParser/assembler 解析组装（docu-system P0）。 */
-const FILE_FORMAT_RULES = '\n\n【多文件输出】把代码拆成多个文件：每个文件前单独一行写相对路径（如 src/index.html、src/style.css、src/app.js），紧跟一个 ``` 代码块装该文件完整内容。index.html 用 <link rel="stylesheet" href="style.css"> 与 <script src="app.js"></script> 引用。必须输出完整文件，禁止省略占位。';
+const FILE_FORMAT_RULES = '\n\n【多文件输出】把代码拆成多个文件：每个文件前单独一行写相对路径（如 src/index.html、src/style.css、src/app.js），紧跟一个 ``` 代码块装该文件完整内容。index.html 用 <link rel="stylesheet" href="style.css"> 与 <script src="app.js"></script> 引用。必须输出完整文件，禁止省略占位。所有 <script> 必须是普通脚本——禁止使用 ES module（不要写 import/export，不要把 script 标成 type="module"）；多个 JS 文件用多个普通 <script src="..."> 引用（会按顺序内联合并），或将全部逻辑放在 app.js 一个文件里。';
 
 /** 各角色人设（驳回轮 system 复用此身份，去掉协作身份/承接模板）。 */
 const SPEC_PERSONA = '你是一名资深产品经理，把需求转化为清晰的产品规格。';

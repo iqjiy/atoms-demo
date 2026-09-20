@@ -28,6 +28,12 @@ describe('协作身份 prompt（修改2 P-A）', () => {
     expect(codeSystem).toContain('多文件输出');
   });
 
+  it('工程师 prompt 禁止使用 ES module（防止组装后 import 报错致按钮失效）', () => {
+    expect(codeSystem).toContain('禁止使用 ES module');
+    expect(codeSystem).toContain('import/export');
+    expect(codeSystem).toContain('type="module"');
+  });
+
   it('驳回轮：prompt 含上一轮产物+修改意见，system 用修订要求(无承接模板)', async () => {
     let captured: LlmRequest | undefined;
     const llm = {
