@@ -10,6 +10,7 @@ import AgentConfigModal from './components/config/AgentConfigModal';
 import {
   startRun,
   postDecision,
+  postAuthKey,
   listSessions,
   listFiles,
   useSession,
@@ -41,6 +42,24 @@ export default function App() {
   const [activeFile, setActiveFile] = useState<DocFile | null>(null);
   /** Agent 配置弹窗（UI 试行占位，功能待开发） */
   const [configOpen, setConfigOpen] = useState(false);
+  /** 分享链接复制成功提示 */
+  const [shareCopied, setShareCopied] = useState(false);
+
+  // 当前会话只读分享链接（completed 才有意义）
+  const shareUrl = active?.shareId && active.latestRun?.status === 'completed'
+    ? `${window.location.origin}/p/${active.shareId}`
+    : null;
+
+  const handleShare = async () => {
+    if (!shareUrl) return;
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 2000);
+    } catch {
+      window.prompt('复制以下只读分享链接（任何人均可查看）：', shareUrl);
+    }
+  };
 
   const toggleFullscreen = useCallback(async () => {
     if (document.fullscreenElement) {
@@ -55,6 +74,15 @@ export default function App() {
     const onChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
     document.addEventListener('fullscreenchange', onChange);
     return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
+  // 公网口令门禁（方案 B）：链接带 ?key= 则自动换 cookie，并立即抹掉地址栏的 key（防泄露）
+  useEffect(() => {
+    const key = new URLSearchParams(window.location.search).get('key');
+    if (!key) return;
+    postAuthKey(key).finally(() => {
+      window.history.replaceState(null, '', window.location.pathname);
+    });
   }, []);
 
   const runId = active?.latestRun?.runId ?? null;
@@ -142,7 +170,7 @@ export default function App() {
     setPendingStart(null);
   };
 
-  const handleStart = async () => {
+  const handleStart = async (): Promise<void> => {
     const v = idea.trim();
     if (!v || submitting) return;
     setSubmitting(true);
@@ -154,6 +182,7 @@ export default function App() {
       setActive({
         projectId: h.projectId,
         title: v.slice(0, 30),
+        shareId: h.shareId,
         latestRun: { runId: h.runId, status: 'running', currentStage: null },
         createdAt: new Date().toISOString(),
       });
@@ -161,7 +190,20 @@ export default function App() {
       setUserMessages([]);
       // 真实 SSE 数据接管后清掉占位（baseState.items 一旦有内容即切换）
     } catch (e) {
-      alert(String(e));
+      const status = (e as { status?: number }).status;
+      if (status === 401) {
+        // 公网口令门禁：弹窗输暗号，换取 cookie 后由用户重新点开始
+        const key = window.prompt('该演示已开启访问口令，请输入后继续：');
+        if (key && (await postAuthKey(key))) {
+          alert('✓ 口令正确，请再点一次「开始」');
+        } else if (key) {
+          alert('口令错误');
+        }
+      } else if (status === 429) {
+        alert('演示次数已达上限，请稍后再试');
+      } else {
+        alert(String(e));
+      }
       setPendingStart(null);
     } finally {
       setSubmitting(false);
@@ -254,8 +296,33 @@ export default function App() {
 
         <div className="min-h-0 flex-1 overflow-auto p-4">
           {active || pendingStart ? (
-            // 消白屏：提交后 active 尚未 set（等 runId），但 pendingStart 已让 ChatFlow 立即渲染占位气泡
-            <ChatFlow state={state} progress={displayProgress} stageStarts={stageStarts} deciding={deciding} onDecide={handleDecide} />
+            <>
+              {/* 完成会话的只读分享条：复制 /p/:shareId 链接给面试官 */}
+              {shareUrl && (
+                <div className="mb-3 flex items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-2">
+                  <span className="text-xs text-slate-500">作品已完成，可分享给他人只读查看</span>
+                  <div className="flex items-center gap-2">
+                    <a
+                      href={shareUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
+                    >
+                      打开 ↗
+                    </a>
+                    <button
+                      type="button"
+                      onClick={handleShare}
+                      className="rounded bg-slate-900 px-2 py-1 text-xs font-medium text-white hover:bg-slate-800"
+                    >
+                      {shareCopied ? '✓ 已复制' : '复制只读链接'}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {/* 消白屏：提交后 active 尚未 set（等 runId），但 pendingStart 已让 ChatFlow 立即渲染占位气泡 */}
+              <ChatFlow state={state} progress={displayProgress} stageStarts={stageStarts} deciding={deciding} onDecide={handleDecide} />
+            </>
           ) : (
             <div className="flex h-full items-center justify-center rounded-md border border-dashed border-slate-300 p-6 text-center text-sm text-slate-400">
               选择左侧会话，或在上方输入想法开始新会话

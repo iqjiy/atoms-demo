@@ -1,4 +1,4 @@
-import { Router, type Request } from 'express';
+import { Router, type Request, type RequestHandler } from 'express';
 import { Orchestrator } from '../orchestrator/runner.js';
 import { AutoApproveGate, ManualApprovalGate } from '../orchestrator/approvalGate.js';
 import { Checkpointer } from '../orchestrator/checkpointer.js';
@@ -12,13 +12,15 @@ export interface RunsDeps {
   repos: Repos;
   llm: LlmClient;
   runManager: RunManager;
+  /** 全局每日 run 数保险丝（方案 B）；缺省则不限（本地/测试）。 */
+  globalRunLimit?: RequestHandler;
 }
 
 export function runsRouter(deps: RunsDeps): Router {
   const router = Router();
 
   // 创建运行：先建 project/run 拿 runId 并注册，编排器后台跑；立即返回 runId。
-  router.post('/runs', async (req, res) => {
+  router.post('/runs', ...(deps.globalRunLimit ? [deps.globalRunLimit] : []), async (req, res) => {
     const body = req.body as { idea?: string; mode?: string };
     const idea = String(body?.idea ?? '').trim();
     if (!idea) {
@@ -57,7 +59,7 @@ export function runsRouter(deps: RunsDeps): Router {
       })
       .finally(() => deps.runManager.finish(run.id));
 
-    res.json({ runId: run.id, projectId: project.id, status: 'running' });
+    res.json({ runId: run.id, projectId: project.id, shareId: project.shareId, status: 'running' });
   });
 
   return router;

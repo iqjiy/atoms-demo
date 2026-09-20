@@ -6,6 +6,18 @@ import type { AgentMessage, Artifact, DocFile, Run } from '../../shared-types/in
 export interface RunHandle {
   runId: string;
   projectId: string;
+  /** 只读分享页 id（建项目即有），用于生成 /p/:shareId 链接 */
+  shareId: string;
+}
+
+/** 提交口令换 HttpOnly cookie（公网口令门禁方案 B）。 */
+export async function postAuthKey(key: string): Promise<boolean> {
+  const res = await fetch('/api/auth', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key }),
+  });
+  return res.ok;
 }
 
 /** 提交需求创建运行（P5：mode 选审批/直通）。 */
@@ -15,7 +27,11 @@ export async function startRun(idea: string, mode: 'auto' | 'approve' = 'auto'):
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ idea, mode }),
   });
-  if (!res.ok) throw new Error(`创建运行失败：${res.status}`);
+  if (!res.ok) {
+    const err = new Error(`创建运行失败：${res.status}`) as Error & { status?: number };
+    err.status = res.status;
+    throw err;
+  }
   return (await res.json()) as RunHandle;
 }
 
@@ -33,6 +49,8 @@ export async function postDecision(runId: string, gate: string, decision: boolea
 export interface SessionItem {
   projectId: string;
   title: string;
+  /** 只读分享页 id（建项目即有）；completed 会话用于生成 /p/:shareId 链接 */
+  shareId: string;
   latestRun: { runId: string; status: Run['status']; currentStage: Run['currentStage'] } | null;
   createdAt: string;
 }
@@ -41,8 +59,8 @@ export interface SessionItem {
 export async function listSessions(): Promise<SessionItem[]> {
   const res = await fetch('/api/projects');
   if (!res.ok) throw new Error('加载会话失败');
-  const body = (await res.json()) as { projects: Array<{ id: string; title: string; createdAt: string; latestRun: SessionItem['latestRun'] }> };
-  return body.projects.map((p) => ({ projectId: p.id, title: p.title, latestRun: p.latestRun, createdAt: p.createdAt }));
+  const body = (await res.json()) as { projects: Array<{ id: string; title: string; shareId: string; createdAt: string; latestRun: SessionItem['latestRun'] }> };
+  return body.projects.map((p) => ({ projectId: p.id, title: p.title, shareId: p.shareId, latestRun: p.latestRun, createdAt: p.createdAt }));
 }
 
 /** 拉某 run 的文件树。 */
