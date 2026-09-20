@@ -34,6 +34,13 @@ describe('协作身份 prompt（修改2 P-A）', () => {
     expect(codeSystem).toContain('type="module"');
   });
 
+  it('工程师 prompt 要求 index.html 自包含（内联 css/js，预览不依赖拆分）', () => {
+    expect(codeSystem).toContain('自包含');
+    expect(codeSystem).toContain('内联');
+    // 仍保留多文件声明契约（落盘用）
+    expect(codeSystem).toContain('多文件');
+  });
+
   it('驳回轮：prompt 含上一轮产物+修改意见，system 用修订要求(无承接模板)', async () => {
     let captured: LlmRequest | undefined;
     const llm = {

@@ -63,8 +63,8 @@ const COLLAB_IDENTITY = '\n\n【你的工作背景】你是一个「想法→应
 /** 产物纪律（保留）：不反问、Markdown。 */
 const COMMON_RULES = '\n\n【输出要求】只输出正式产物本身（Markdown 格式），不客套、结尾不反问。';
 
-/** 多文件输出契约：路径行 + 围栏代码块，供 fileParser/assembler 解析组装（docu-system P0）。 */
-const FILE_FORMAT_RULES = '\n\n【多文件输出】把代码拆成多个文件：每个文件前单独一行写相对路径（如 src/index.html、src/style.css、src/app.js），紧跟一个 ``` 代码块装该文件完整内容。index.html 用 <link rel="stylesheet" href="style.css"> 与 <script src="app.js"></script> 引用。必须输出完整文件，禁止省略占位。所有 <script> 必须是普通脚本——禁止使用 ES module（不要写 import/export，不要把 script 标成 type="module"）；多个 JS 文件用多个普通 <script src="..."> 引用（会按顺序内联合并），或将全部逻辑放在 app.js 一个文件里。';
+/** 输出契约（docu-problem5）：index.html 自包含（预览用）+ 多文件声明（落盘用）解耦，禁 ES module。 */
+const FILE_FORMAT_RULES = '\n\n【输出契约】你要同时给出「可运行预览」与「工作区文件」，两者解耦：\n1. src/index.html 必须是**自包含**单文件：CSS 内联在 <style> 标签里、JS 内联在 <script> 标签里，不依赖任何其它本地文件即可直接在浏览器打开运行（这是预览用的，禁止用 <link rel="stylesheet" href="..."> 或 <script src="..."> 引用本地文件）。\n2. 在此基础上，再按多文件输出契约把同一份代码拆成多个文件落工作区展示：每个文件前单独一行写相对路径（如 src/index.html、src/style.css、src/app.js），紧跟一个 ``` 代码块装该文件完整内容。落盘的多文件版本里 index.html 可以用 <link>/<script src> 引用拆分出的 css/js，但第 1 条的自包含 index.html 必须先独立给出。\n3. 必须输出完整文件，禁止省略占位。禁止使用 ES module（不要写 import/export，不要把 script 标成 type="module"）。';
 
 /** 各角色人设（驳回轮 system 复用此身份，去掉协作身份/承接模板）。 */
 const SPEC_PERSONA = '你是一名资深产品经理，把需求转化为清晰的产品规格。';
