@@ -6,6 +6,7 @@ import PreviewFrame from './components/preview/PreviewFrame';
 import PreviewToolbar from './components/preview/PreviewToolbar';
 import FileTree from './components/files/FileTree';
 import FileViewer from './components/files/FileViewer';
+import AgentConfigModal from './components/config/AgentConfigModal';
 import {
   startRun,
   postDecision,
@@ -38,6 +39,8 @@ export default function App() {
   /** 工作区文件树 */
   const [files, setFiles] = useState<DocFile[]>([]);
   const [activeFile, setActiveFile] = useState<DocFile | null>(null);
+  /** Agent 配置弹窗（UI 试行占位，功能待开发） */
+  const [configOpen, setConfigOpen] = useState(false);
 
   const toggleFullscreen = useCallback(async () => {
     if (document.fullscreenElement) {
@@ -229,6 +232,13 @@ export default function App() {
                   <input type="radio" name="mode" checked={mode === 'auto'} onChange={() => setMode('auto')} />
                   直接生成
                 </label>
+                <button
+                  type="button"
+                  onClick={() => setConfigOpen(true)}
+                  className="ml-1 rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
+                >
+                  ⚙ Agent配置
+                </button>
               </div>
               <button
                 type="button"
@@ -323,6 +333,8 @@ export default function App() {
           </>
         )}
       </section>
+
+      <AgentConfigModal open={configOpen} onClose={() => setConfigOpen(false)} />
     </div>
   );
 }
