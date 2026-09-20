@@ -85,3 +85,27 @@ describe('MessageBus 上下文裁剪', () => {
     expect(ctx).not.toContain('规格 v1（被驳回）');
   });
 });
+
+describe('MessageBus latestOfStage', () => {
+  it('latestOfStage 返回该 stage 最新一版（驳回重跑后取新）', () => {
+    const bus = new MessageBus();
+    bus.publish({ ...msg('RunSpecAction', 'spec', 'v1'), iteration: 1 });
+    bus.publish({ ...msg('RunSpecAction', 'spec', 'v2'), iteration: 2 });
+    bus.publish(msg('RunCodeAction', 'code', 'c'));
+
+    expect(bus.latestOfStage('spec')?.content).toBe('v2');
+    expect(bus.latestOfStage('code')?.content).toBe('c');
+    expect(bus.latestOfStage('architecture')).toBeUndefined();
+  });
+});
+
+describe('MessageBus 反馈消息（红线：不污染产物/下游上下文）', () => {
+  it('ReviewFeedback 反馈消息不污染 contextFor / latestOfStage', () => {
+    const bus = new MessageBus();
+    bus.publish(msg('RunSpecAction', 'spec', '规格v1'));
+    bus.publish({ ...msg('ReviewFeedback', 'spec', '驳回:配色改深'), role: 'reviewer' });
+    expect(bus.latestOfStage('spec')?.content).toBe('规格v1'); // 仍是产物，不是反馈
+    expect(bus.contextFor(['spec'])).toContain('规格v1');
+    expect(bus.contextFor(['spec'])).not.toContain('驳回:配色改深'); // 反馈不进下游上下文
+  });
+});

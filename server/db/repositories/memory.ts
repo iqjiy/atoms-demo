@@ -89,7 +89,7 @@ export function createInMemoryRepos(): Repos {
     },
 
     messages: {
-      async append({ runId, iteration, role, stage, content, causeBy, artifactId = null }) {
+      async append({ runId, iteration, role, stage, content, causeBy, artifactId = null, replyTo = null }) {
         const seq = [...messages.values()].filter(
           (m) => m.runId === runId && m.iteration === iteration,
         ).length + 1;
@@ -103,6 +103,7 @@ export function createInMemoryRepos(): Repos {
           stage,
           content,
           causeBy,
+          replyTo,
           createdAt: monoNow(),
         };
         messages.set(m.id, m);

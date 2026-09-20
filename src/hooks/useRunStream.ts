@@ -131,7 +131,9 @@ export function useSession(runId: string | null): { state: ChatState; live: bool
  * 不能「一有 SSE 事件就整包换成 live」（会丢历史），也不能整包用 replay（会丢流式增量）。
  */
 export function mergeReplayWithLive(replayed: ChatState, live: ChatState): ChatState {
-  const key = (it: ChatState['items'][number]) => `${it.side}:${it.stage ?? 'msg'}:${it.iteration}`;
+  // key 含 kind：反馈气泡(ReviewFeedback, kind='feedback')与被驳产物气泡同 side:stage:iteration，须区分，
+  // 否则瞬时 SSE 落后时反馈气泡会被误判为「已被 live 覆盖」而短暂消失（docu-problem2 终审 I1）。
+  const key = (it: ChatState['items'][number]) => `${it.side}:${it.stage ?? 'msg'}:${it.iteration}:${it.kind ?? ''}`;
   const replayByKey = new Map(replayed.items.map((it) => [key(it), it]));
   const liveKeys = new Map(live.items.map((it) => [key(it), it]));
   // 重放气泡：仅保留 live 未覆盖的（历史）；live 气泡：全部（含更新/新增/流式）
@@ -151,5 +153,7 @@ export function mergeReplayWithLive(replayed: ChatState, live: ChatState): ChatS
     livePreview: live.livePreview ?? replayed.livePreview,
     // stageStarts：live 优先（含实时计时），replay 兜底（历史会话）
     stageStarts: { ...replayed.stageStarts, ...live.stageStarts },
+    // filesVersion：取两侧较大者，保持单调递增（files_saved 增量刷新文件树）
+    filesVersion: Math.max(live.filesVersion, replayed.filesVersion),
   };
 }

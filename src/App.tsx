@@ -29,6 +29,9 @@ export default function App() {
   const [userMessages, setUserMessages] = useState<string[]>([]);
   /** 提交瞬间的 optimistic 占位（消白屏）：拿到 runId 前显示「用户消息 + PM 正在输入」 */
   const [pendingStart, setPendingStart] = useState<ChatState | null>(null);
+  /** 通过/驳回的乐观决策叠加（修改1A）：gate → 决策发生时的迭代轮次 + decision；
+   * 只贴在被点击那一轮气泡上；下一轮 stage_start（iteration+1）后新气泡 iteration 不同，叠加自然失效 */
+  const [decisions, setDecisions] = useState<Record<string, { iteration: number; decision: 'approved' | 'rejected' }>>({});
   /** 预览全屏（Fullscreen API） */
   const [isFullscreen, setIsFullscreen] = useState(false);
   const previewSectionRef = useRef<HTMLElement | null>(null);
@@ -55,8 +58,22 @@ export default function App() {
   const { state: baseState, progress } = useSession(runId);
   // 叠加底部输入框的「壳」用户消息（纯展示，不触发重跑）
   const withUser = userMessages.reduce((s, m) => appendUserMessage(s, m), baseState);
+  // 修改1A：叠加乐观决策条——仅贴在被点击那一轮气泡上（iteration 匹配），下一轮 stage_start 后新气泡 iteration 不同，叠加自然失效
+  const withDecisions = (() => {
+    const gates = Object.keys(decisions);
+    if (gates.length === 0) return withUser;
+    return {
+      ...withUser,
+      items: withUser.items.map((it) => {
+        if (!it.stage || it.kind === 'feedback') return it;
+        const d = decisions[it.stage];
+        if (!d || it.iteration !== d.iteration) return it;
+        return { ...it, pendingApproval: null, decision: d.decision };
+      }),
+    };
+  })();
   // 提交后、runId 未就位时用 optimistic 占位；一旦有真实数据则切换
-  const state = pendingStart && baseState.items.length === 0 ? pendingStart : withUser;
+  const state = pendingStart && baseState.items.length === 0 ? pendingStart : withDecisions;
   // pendingStart 期间 progress 为空，合成「PM 进行中」让进度条立刻亮起
   const displayProgress = pendingStart && baseState.items.length === 0
     ? { current: 'spec' as Stage, doneStages: [] as Stage[], running: true }
@@ -86,20 +103,28 @@ export default function App() {
     if (baseState.items.length > 0) setPendingStart(null);
   }, [baseState.items.length]);
 
-  // run 完成 / 会话切换后拉文件树
+  // 修跨会话泄漏（I2）：runId 变化时重置乐观决策叠加，避免把上一条会话的 decision 误贴到当前会话气泡
   useEffect(() => {
-    if (!runId) {
-      setFiles([]);
-      setActiveFile(null);
-      return;
-    }
-    if (!baseState.done) return;
+    setDecisions({});
+  }, [runId]);
+
+  // run 完成 / 会话切换 / files_saved（某阶段通过落盘）后拉文件树
+  // runId 变化（含切换到无文件的进行中会话）时先清空，再看 done/filesVersion 决定是否拉取——
+  // 否则旧会话的文件树会残留到新会话（code-review 发现 #1）。
+  useEffect(() => {
+    setFiles([]);
+    setActiveFile(null);
+  }, [runId]);
+
+  useEffect(() => {
+    if (!runId) return; // 清空已由上面的 runId effect 处理
+    if (!state.done && state.filesVersion === 0) return;
     let cancelled = false;
     listFiles(runId)
       .then((fs) => { if (!cancelled) setFiles(fs); })
       .catch(() => { /* 忽略文件加载失败 */ });
     return () => { cancelled = true; };
-  }, [runId, baseState.done]);
+  }, [runId, state.done, state.filesVersion]);
 
   const handleNew = () => {
     setActive(null);
@@ -143,9 +168,21 @@ export default function App() {
   const handleDecide = async (gate: string, approved: boolean, comment?: string) => {
     if (!runId) return;
     setDeciding(true);
+    // 修改1A：乐观出「✓ 已通过 / ✕ 已驳回」条——记录被点击那一刻该 gate 最新一轮气泡的 iteration，
+    // 叠加只贴那一轮；下一轮 stage_start 后新气泡 iteration 不同，叠加自动失效
+    const decidedIteration = (() => {
+      let iter = 0;
+      withUser.items.forEach((it) => {
+        if (it.stage === gate && it.kind !== 'feedback' && it.iteration >= iter) iter = it.iteration;
+      });
+      return iter;
+    })();
+    setDecisions((d) => ({ ...d, [gate]: { iteration: decidedIteration, decision: approved ? 'approved' : 'rejected' } }));
     try {
       await postDecision(runId, gate, approved, comment);
     } catch (e) {
+      // 回滚：撤掉乐观条，审批卡仍在（baseState 未变）并提示
+      setDecisions((d) => { const { [gate]: _dropped, ...rest } = d; return rest; });
       alert(String(e));
     } finally {
       setDeciding(false);

@@ -39,6 +39,8 @@ export interface AgentMessage {
   stage: Stage;
   content: string;
   causeBy: string;
+  /** 驳回反馈消息指向被驳回的产物消息 id；普通产物为 null。 */
+  replyTo?: string | null;
   createdAt: string;
 }
 

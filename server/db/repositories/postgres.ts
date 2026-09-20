@@ -24,7 +24,9 @@ const toRun = (r: any): Run => ({
 });
 const toMessage = (r: any): AgentMessage => ({
   id: r.id, runId: r.run_id, artifactId: r.artifact_id, seq: r.seq, iteration: r.iteration,
-  role: r.role, stage: r.stage, content: r.content, causeBy: r.cause_by, createdAt: r.created_at,
+  role: r.role, stage: r.stage, content: r.content, causeBy: r.cause_by,
+  replyTo: r.reply_to ?? null,
+  createdAt: r.created_at,
 });
 const toArtifact = (r: any): Artifact => ({
   id: r.id, runId: r.run_id, version: r.version, kind: r.kind,
@@ -96,14 +98,14 @@ export function createPostgresRepos(db: Db): Repos {
     },
 
     messages: {
-      async append({ runId, iteration, role, stage, content, causeBy, artifactId = null }) {
+      async append({ runId, iteration, role, stage, content, causeBy, artifactId = null, replyTo = null }) {
         const { rows } = await db.query(
-          `INSERT INTO messages (id, run_id, artifact_id, seq, iteration, role, stage, content, cause_by)
+          `INSERT INTO messages (id, run_id, artifact_id, seq, iteration, role, stage, content, cause_by, reply_to)
            VALUES (gen_random_uuid(), $1, $2,
              (SELECT COALESCE(MAX(seq),0)+1 FROM messages WHERE run_id=$1 AND iteration=$3),
-             $3, $4, $5, $6, $7)
+             $3, $4, $5, $6, $7, $8)
            RETURNING *`,
-          [runId, artifactId, iteration, role, stage, content, causeBy],
+          [runId, artifactId, iteration, role, stage, content, causeBy, replyTo],
         );
         return toMessage(rows[0]);
       },

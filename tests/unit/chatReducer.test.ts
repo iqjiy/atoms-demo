@@ -257,6 +257,19 @@ describe('stageStarts：阶段计时起点（PM timer fix）', () => {
   });
 });
 
+describe('问题2-T5：新事件归约（artifact_ready / files_saved）', () => {
+  it('artifact_ready 置 artifact 但不置 done（预览提前于 run 完成）', () => {
+    const s = reduceChatEvent(initialChatState(), { type: 'artifact_ready', runId: 'r', artifact: { kind: 'html', filename: 'index.html', content: '<html/>' } } as any);
+    expect(s.artifact?.content).toBe('<html/>');
+    expect(s.done).toBe(false);
+  });
+
+  it('files_saved 递增 filesVersion（供前端重拉文件树）', () => {
+    const s = reduceChatEvent(initialChatState(), { type: 'files_saved', runId: 'r', stage: 'spec' } as any);
+    expect(s.filesVersion).toBe(1);
+  });
+});
+
 describe('code-review 修复（C5）', () => {
   it('重放保留 requirement 为用户气泡（右），不丢原始想法', () => {
     const messages = [
@@ -270,5 +283,66 @@ describe('code-review 修复（C5）', () => {
     expect(reqBubble?.text).toBe('做一个待办应用');
     // agent 的 spec 气泡也在
     expect(s.items.some((i) => i.stage === 'spec')).toBe(true);
+  });
+});
+
+describe('修改1：驳回意见气泡（ReviewFeedback）', () => {
+  const feedbackMsg = (over: Partial<AgentMessage> = {}): AgentMessage => ({
+    id: 'm9', runId: 'r1', artifactId: null, seq: 9, iteration: 1,
+    role: 'reviewer', stage: 'spec', content: '配色改深',
+    causeBy: 'ReviewFeedback', replyTo: 'spec-1', createdAt: new Date().toISOString(),
+    ...over,
+  });
+
+  it('stage_done 的 ReviewFeedback 渲染为驳回意见气泡（kind=feedback），不当作产物气泡', () => {
+    const s = reduceChatEvent(initialChatState(), { type: 'stage_done', message: feedbackMsg() });
+    const fb = s.items.find((i) => i.text.includes('配色改深'));
+    expect(fb).toBeTruthy();
+    expect(fb?.kind).toBe('feedback');
+    expect(fb?.role).toBe('reviewer');
+    expect(fb?.side).toBe('agent');
+    expect(fb?.stage).toBe('spec');
+    expect(fb?.iteration).toBe(1);
+    expect(fb?.status).toBe('done');
+  });
+
+  it('ReviewFeedback 的 stage_done 不把 reviewer 意见覆盖到正在 streaming 的产物气泡上', () => {
+    // 时序：驳回 → reviewer 意见 stage_done（此时旧产物气泡可能仍 streaming，尚未被新一轮 stage_start 接管）
+    let s = initialChatState();
+    s = reduceChatEvent(s, start('pm', 'spec', 1));
+    s = reduceChatEvent(s, { type: 'token', role: 'pm', stage: 'spec', delta: '规格 v1' });
+    s = reduceChatEvent(s, { type: 'stage_done', message: feedbackMsg() });
+    const product = s.items.find((i) => i.stage === 'spec' && i.kind !== 'feedback');
+    const fb = s.items.find((i) => i.kind === 'feedback');
+    expect(product?.text).toBe('规格 v1'); // 产物气泡文本不被意见覆盖
+    expect(product?.status).toBe('streaming'); // 产物气泡状态不被置 done
+    expect(fb?.text).toBe('配色改深');
+    // 两个气泡并存，且 id 不撞
+    expect(product?.id).not.toBe(fb?.id);
+  });
+
+  it('普通产物的 stage_done 保持原行为（按 stage 收尾 streaming 气泡）', () => {
+    let s = initialChatState();
+    s = reduceChatEvent(s, start('pm', 'spec', 1));
+    s = reduceChatEvent(s, { type: 'stage_done', message: feedbackMsg({ causeBy: 'RunSpecAction', role: 'pm', content: '规格定稿' }) });
+    expect(s.items).toHaveLength(1);
+    expect(s.items[0].kind).toBeUndefined();
+    expect(s.items[0]).toMatchObject({ status: 'done', text: '规格定稿' });
+  });
+
+  it('buildReplayState 把 causeBy=ReviewFeedback 的落库消息重放为 feedback 气泡（关页重放仍可见意见）', () => {
+    const messages: AgentMessage[] = [
+      { id: 's1', runId: 'r1', artifactId: null, seq: 1, iteration: 1, role: 'pm', stage: 'spec', content: '规格 v1', causeBy: 'RunSpecAction', createdAt: new Date().toISOString() },
+      feedbackMsg({ id: 'f1', seq: 2 }),
+      { id: 's2', runId: 'r1', artifactId: null, seq: 3, iteration: 2, role: 'pm', stage: 'spec', content: '规格 v2', causeBy: 'RunSpecAction', createdAt: new Date().toISOString() },
+    ];
+    const s = buildReplayState(messages, { status: 'running', currentStage: 'spec' } as Run, null);
+    const fb = s.items.find((i) => i.kind === 'feedback');
+    expect(fb).toMatchObject({ role: 'reviewer', stage: 'spec', iteration: 1, text: '配色改深', status: 'done' });
+    // 产物两轮气泡不受影响，feedback 夹在中间（被驳气泡 → 意见 → 重跑气泡）
+    const specBubbles = s.items.filter((i) => i.stage === 'spec' && i.kind !== 'feedback');
+    expect(specBubbles.map((i) => i.text)).toEqual(['规格 v1', '规格 v2']);
+    expect(s.items.indexOf(fb!)).toBeGreaterThan(s.items.indexOf(specBubbles[0]));
+    expect(s.items.indexOf(fb!)).toBeLessThan(s.items.indexOf(specBubbles[1]));
   });
 });

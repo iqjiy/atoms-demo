@@ -69,31 +69,9 @@ export class Orchestrator {
         }
       }
 
-      // 3) 收尾：把各角色产物落成文件（pm→/pm、architect→/architect、engineer→/src 多文件），
-      //    工程师多文件经组装器内联为单自包含 HTML 存 artifact（复用 iframe 预览）。
-      const all = [...this.bus.all()];
-      for (const role of ROLES) {
-        const msg = all.filter((m) => m.stage === role.action.stage).pop(); // 该 stage 最新一版
-        if (!msg) continue;
-        const dir = role.name === 'pm' ? 'pm' : role.name === 'architect' ? 'architect' : 'src';
-        const files = role.name === 'engineer'
-          ? parseFiles(msg.content, 'src')
-          : [{ path: `${dir}/${role.name === 'pm' ? 'spec' : 'arch'}.md`, content: msg.content }];
-        const toSave = files.length ? files : [{ path: 'src/index.html', content: msg.content }];
-        await checkpointer.saveFiles(runId, msg.iteration, role.name, role.action.stage, toSave);
-      }
-
-      // 组装预览 HTML：优先工程师多文件组装；组装的/单文件的统一过 ensureHtml
-      // （提取/闭合校验/截断修复/兜底模板），保证预览永不为空且结构完整（review I-1）。
-      const codeMsg = all.filter((m) => m.stage === 'code').pop();
-      const parsed = parseFiles(codeMsg?.content ?? '', 'src');
-      const assembled = parsed.length ? assembleHtml(parsed) : null;
-      const artifact: NewArtifact = {
-        kind: 'html',
-        filename: 'index.html',
-        content: injectStorageShim(ensureHtml(assembled ?? codeMsg?.content ?? '', input.idea)),
-      };
-      await checkpointer.saveArtifact(runId, artifact);
+      // 3) 收尾：文件已在各级通过时落盘（T3），预览已在工程师 code 完成时落库（T2）。
+      //    这里只发 run_done 兜底（带最新 artifact，供关页重放）。
+      const artifact = (await checkpointer.latestArtifact(runId)) ?? emptyArtifact();
       await checkpointer.setRunStatus(runId, 'completed', 'code');
       emit({ type: 'run_done', runId, artifact });
 
@@ -123,6 +101,16 @@ export class Orchestrator {
       await this.deps.checkpointer.recordApproval(runId, gate, decision.approved, decision.comment ?? null, iteration);
 
       if (decision.approved) {
+        // 问题2：通过才落文件（被驳回的中间版不落盘）。每级通过分别落：pm→/pm、architect→/architect、engineer→/src。
+        const msg = this.bus.latestOfStage(role.action.stage);
+        if (msg) {
+          const parsed = role.name === 'engineer' ? parseFiles(msg.content, 'src') : [];
+          const files = role.name === 'engineer'
+            ? (parsed.length ? parsed : [{ path: 'src/index.html', content: msg.content }])
+            : [{ path: role.name === 'pm' ? 'pm/spec.md' : 'architect/arch.md', content: msg.content }];
+          await this.deps.checkpointer.saveFiles(runId, msg.iteration, role.name, role.action.stage, files);
+          this.deps.emit({ type: 'files_saved', runId, stage: role.action.stage });
+        }
         await this.deps.checkpointer.setRunStatus(runId, 'running', gate);
         return true; // 批准：封存本级，进入下一级
       }
@@ -130,6 +118,16 @@ export class Orchestrator {
       if (iteration >= MAX_STAGE_ITERATION) return false;
       // review R5：重跑期间把状态拉回 running，避免 DB 停留 awaiting_approval 导致重放出假审批卡/决策 410
       await this.deps.checkpointer.setRunStatus(runId, 'running', gate);
+      // 修改1B/2：驳回意见作为一等消息进流（渲染气泡 + 进被驳agent上下文），replyTo 指向被驳产物
+      if (decision.comment?.trim()) {
+        const rejected = this.bus.latestOfStage(gate); // 被驳那版（重跑前的最新；bus 已排除反馈）
+        const fb = await this.deps.checkpointer.appendMessage({
+          runId, iteration, role: 'reviewer', stage: gate,
+          content: decision.comment.trim(), causeBy: 'ReviewFeedback', replyTo: rejected?.id ?? null,
+        });
+        this.bus.publish(fb); // 进 bus（contextFor/latestOfStage 已排除，不污染产物；供重放/补发携带）
+        this.deps.emit({ type: 'stage_done', message: fb }); // 复用 stage_done 让前端出气泡（见 Task 5 渲染区分）
+      }
       feedback = decision.comment ?? null;
       iteration += 1;
     }
@@ -142,10 +140,15 @@ export class Orchestrator {
     emit({ type: 'stage_start', role: role.name, stage: role.action.stage, iteration });
 
     const upstream = this.bus.contextFor(role.upstreamStages);
+    // 修改2 P-C：驳回轮带上被驳回那一版本级产物（latestOfStage 在本轮重跑前=被驳那版）
+    const prevContent = feedback?.trim()
+      ? this.bus.latestOfStage(role.action.stage)?.content ?? null
+      : null;
     const content = await role.action.run({
       idea,
       upstream,
       feedback,
+      prevContent,
       llm,
       onToken: (delta) => emit({ type: 'token', role: role.name, stage: role.action.stage, delta }),
     });
@@ -155,6 +158,19 @@ export class Orchestrator {
       content, causeBy: role.action.name,
     });
     emit({ type: 'stage_done', message });
+
+    // 问题2：工程师 code 一完成即组装+落 artifact + emit artifact_ready（预览立即可用，供审核评判；不等整 run 收尾）。
+    // 预览永不为空：parseFiles 空→单文件 ensureHtml；assembleHtml null→ensureHtml 兜底（含空/截断修复）。
+    if (role.name === 'engineer') {
+      const parsed = parseFiles(message.content, 'src');
+      const assembled = parsed.length ? assembleHtml(parsed) : null;
+      const artifact: NewArtifact = {
+        kind: 'html', filename: 'index.html',
+        content: injectStorageShim(ensureHtml(assembled ?? message.content, idea)),
+      };
+      await this.deps.checkpointer.saveArtifact(runId, artifact);
+      emit({ type: 'artifact_ready', runId, artifact });
+    }
   }
 
   private async publishAndStore(input: {

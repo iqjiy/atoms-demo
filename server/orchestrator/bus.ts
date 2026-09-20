@@ -31,10 +31,13 @@ export class MessageBus {
   /**
    * 上下文裁剪：只把指定上游阶段的产物喂给下游，防 token 膨胀。
    * 同一阶段若因驳回/迭代重跑而有多版，只取**最新一版**（避免新旧并存喂给下游造成矛盾）。
+   * 红线：跳过 causeBy==='ReviewFeedback' 的反馈消息——反馈是 reviewer 的旁白，
+   * 不是阶段产物，绝不能进下游上下文。
    */
   contextFor(stages: Stage[]): string {
     const latestByStage = new Map<Stage, AgentMessage>();
     for (const m of this.messages) {
+      if (m.causeBy === 'ReviewFeedback') continue;
       if (stages.includes(m.stage)) latestByStage.set(m.stage, m); // 后发布覆盖先发布 = 取最新
     }
     // 按传入 stages 顺序输出，保证上游在前的稳定阅读顺序
@@ -43,6 +46,16 @@ export class MessageBus {
       .filter((m): m is AgentMessage => Boolean(m))
       .map((m) => `## [${m.role}/${m.stage}]\n${m.content}`)
       .join('\n\n');
+  }
+
+  /** 取某 stage 最新一版 message（驳回重跑后取新）；无则 undefined。红线：反馈不算产物。 */
+  latestOfStage(stage: Stage): AgentMessage | undefined {
+    let latest: AgentMessage | undefined;
+    for (const m of this.messages) {
+      if (m.causeBy === 'ReviewFeedback') continue;
+      if (m.stage === stage) latest = m; // 后发布覆盖先发布
+    }
+    return latest;
   }
 
   /** 只读访问已发布消息（runner 收尾取产物用）。 */

@@ -46,6 +46,7 @@ export const SCHEMA_STATEMENTS: string[] = [
      stage text NOT NULL CHECK (stage IN ('requirement','spec','architecture','code')),
      content text NOT NULL,
      cause_by text NOT NULL,
+     reply_to text,
      created_at timestamptz NOT NULL DEFAULT now(),
      UNIQUE (run_id, iteration, seq)
    )`,

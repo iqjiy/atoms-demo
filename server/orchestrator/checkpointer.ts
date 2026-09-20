@@ -24,6 +24,7 @@ export class Checkpointer {
     stage: Stage;
     content: string;
     causeBy: string;
+    replyTo?: string | null;
   }) {
     return this.repos.messages.append(input);
   }
@@ -35,6 +36,13 @@ export class Checkpointer {
       filename: artifact.filename,
       content: artifact.content,
     });
+  }
+
+  /** 读取该 run 最新 artifact（映射回 NewArtifact 形状）；无则返回 null。用于 run_done 兜底重放。 */
+  async latestArtifact(runId: string): Promise<NewArtifact | null> {
+    const a = await this.repos.artifacts.latestByRun(runId);
+    if (!a) return null;
+    return { kind: a.kind, filename: a.filename, content: a.content };
   }
 
   /** docu-system：把某角色本轮的一组文件落库（path→content）。 */
