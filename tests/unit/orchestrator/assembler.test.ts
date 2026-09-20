@@ -68,4 +68,30 @@ describe('assembler：/src 多文件内联为单自包含 HTML', () => {
     const out = assembleHtml(files)!;
     expect(out.match(/APP/g)).toHaveLength(1);
   });
+
+  it('真实死按钮结构回归：index.html 只引 app.js + style.css，app.js 依赖未被引用的 store.js/utils.js', () => {
+    // 复刻问题4那次抽奖产物的结构：按钮无响应的根因是 store/utils 未被 index.html
+    // 直接引用，组装时整个被丢弃，app.js 调用 createStore() 报 ReferenceError。
+    const files = [
+      {
+        path: 'src/index.html',
+        content: '<html><head><link rel="stylesheet" href="style.css"></head><body><button id="draw">抽奖</button><script src="app.js"></script></body></html>',
+      },
+      { path: 'src/app.js', content: 'const store = createStore(); document.getElementById("draw").addEventListener("click", () => renderApp(store));' },
+      { path: 'src/store.js', content: 'function createStore(){ return { count: 0 }; }' },   // 未被 index.html 引用
+      { path: 'src/utils.js', content: 'function renderApp(s){ s.count++; }' },              // 未被 index.html 引用
+      { path: 'src/style.css', content: 'button{cursor:pointer}' },
+    ];
+    const out = assembleHtml(files)!;
+    // app.js 自己必须在内（按钮绑定在这里）
+    expect(out).toContain('document.getElementById("draw")');
+    // 它依赖的两个全局函数也必须在内——否则按钮点击就 ReferenceError（死按钮复现）
+    expect(out).toContain('function createStore()');
+    expect(out).toContain('function renderApp(s)');
+    // css 也要内联
+    expect(out).toContain('<style>button{cursor:pointer}</style>');
+    // 外链全部消失，产物是单自包含 HTML
+    expect(out).not.toContain('src="app.js"');
+    expect(out).not.toContain('href="style.css"');
+  });
 });
