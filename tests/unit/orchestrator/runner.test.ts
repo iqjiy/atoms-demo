@@ -443,6 +443,77 @@ describe('P5 逐级审批闸门（单向向前、驳回只重跑本级）', () =
   });
 });
 
+describe('问题5-T2: 预览优先用自包含 index.html 原文（assembleHtml 降为兜底）', () => {
+  it('自包含 index.html + 拆分文件：预览用原文（含内联 style/script），不被重新组装', async () => {
+    const { repos } = setup();
+    const rawIndex = '<!DOCTYPE html>\n<html><head><style>body{background:#123}</style></head><body><button id="x">go</button><script>document.getElementById("x").onclick=()=>console.log("INLINE")</script></body></html>';
+    const llm = new FakeLlmClient();
+    llm.complete = async (req) => {
+      if (req.system.includes('工程师')) {
+        return [
+          'src/index.html',
+          '```html',
+          rawIndex,
+          '```',
+          'src/app.js',
+          '```js',
+          'console.log("SPLIT-APP")',
+          '```',
+        ].join('\n');
+      }
+      return new FakeLlmClient().complete(req);
+    };
+    const orc = new Orchestrator({
+      llm,
+      gate: new AutoApproveGate(),
+      checkpointer: new Checkpointer(repos),
+      emit: () => {},
+    });
+    const result = await orc.runProject({ idea: 'x' });
+    // 预览必须来自原文（含内联 style + 内联 script 标识）
+    expect(result.artifact.content).toContain('body{background:#123}');
+    expect(result.artifact.content).toContain('INLINE');
+    // 不残留对外链引用（自包含契约下不应有 <script src> 或 <link href> 指向本地）
+    expect(result.artifact.content).not.toContain('src="app.js"');
+    expect(result.artifact.content).not.toContain('href="style.css"');
+    // 仍落库可读回
+    const art = await repos.artifacts.latestByRun(result.runId);
+    expect(art?.content).toBe(result.artifact.content);
+  });
+
+  it('index.html 引用了未产出的 main.js：走组装兜底，产物无悬空 <script src="main.js">', async () => {
+    const { repos } = setup();
+    // 工程师声明 index.html 引用 main.js，但只产出 index.html（main.js 未产出 → 404 风险）
+    const llm = new FakeLlmClient();
+    llm.complete = async (req) => {
+      if (req.system.includes('工程师')) {
+        return [
+          'src/index.html',
+          '```html',
+          '<!DOCTYPE html><html><body><p>app</p><script src="main.js"></script></body></html>',
+          '```',
+        ].join('\n');
+      }
+      return new FakeLlmClient().complete(req);
+    };
+    const orc = new Orchestrator({
+      llm,
+      gate: new AutoApproveGate(),
+      checkpointer: new Checkpointer(repos),
+      emit: () => {},
+    });
+    const result = await orc.runProject({ idea: 'x' });
+    // 兜底链必须保证：无悬空的本地 <script src="main.js">（避免 404）
+    expect(result.artifact.content).not.toContain('src="main.js"');
+    // 仍是非空可渲染 HTML
+    expect(result.artifact.content).toContain('<html');
+    expect(result.artifact.content).toContain('</html>');
+    // 落库一致
+    const art = await repos.artifacts.latestByRun(result.runId);
+    expect(art?.content).toBe(result.artifact.content);
+  });
+});
+
 describe('P5 run 状态生命周期与迭代上限', () => {
   it('全部批准后 runs 状态落 completed（不留 running）', async () => {
     const { repos } = setup();

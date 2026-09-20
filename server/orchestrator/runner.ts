@@ -4,7 +4,7 @@ import type { ApprovalGate } from './approvalGate.js';
 import { Checkpointer } from './checkpointer.js';
 import { ensureHtml, injectStorageShim } from './htmlGuard.js';
 import { parseFiles } from './fileParser.js';
-import { assembleHtml } from './assembler.js';
+import { assembleHtml, hasUninlinedLocalRef, stripUninlinedLocalRefs } from './assembler.js';
 import type { LlmClient } from '../llm/client.js';
 import type { AgentMessage, NewArtifact, OrchestratorEvent, Stage } from './types.js';
 
@@ -161,12 +161,21 @@ export class Orchestrator {
 
     // 问题2：工程师 code 一完成即组装+落 artifact + emit artifact_ready（预览立即可用，供审核评判；不等整 run 收尾）。
     // 预览永不为空：parseFiles 空→单文件 ensureHtml；assembleHtml null→ensureHtml 兜底（含空/截断修复）。
+    // 问题5-T2：自包含契约下优先用 index.html 原文（含其内联 style/script）；仅当缺失或引用了未产出文件时走组装兜底，并清理悬空引用避免 404。
     if (role.name === 'engineer') {
       const parsed = parseFiles(message.content, 'src');
-      const assembled = parsed.length ? assembleHtml(parsed) : null;
+      const indexHtml = parsed.find((f) => /(^|\/)index\.html$/i.test(f.path))?.content ?? null;
+      let html: string;
+      if (indexHtml && !hasUninlinedLocalRef(indexHtml, parsed)) {
+        html = ensureHtml(indexHtml, idea); // 自包含：直接用原文
+      } else {
+        const assembled = parsed.length ? assembleHtml(parsed) : null;
+        const fallback = assembled ?? indexHtml ?? message.content;
+        html = ensureHtml(stripUninlinedLocalRefs(fallback, parsed), idea); // 兜底链 + 清理悬空引用
+      }
       const artifact: NewArtifact = {
         kind: 'html', filename: 'index.html',
-        content: injectStorageShim(ensureHtml(assembled ?? message.content, idea)),
+        content: injectStorageShim(html),
       };
       await this.deps.checkpointer.saveArtifact(runId, artifact);
       emit({ type: 'artifact_ready', runId, artifact });

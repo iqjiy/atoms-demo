@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { assembleHtml } from '../../../server/orchestrator/assembler.js';
+import { assembleHtml, hasUninlinedLocalRef } from '../../../server/orchestrator/assembler.js';
 
 describe('assembler：/src 多文件内联为单自包含 HTML', () => {
   it('把 link[href=css] 与 script[src=js] 内联进 html', () => {
@@ -93,5 +93,47 @@ describe('assembler：/src 多文件内联为单自包含 HTML', () => {
     // 外链全部消失，产物是单自包含 HTML
     expect(out).not.toContain('src="app.js"');
     expect(out).not.toContain('href="style.css"');
+  });
+});
+
+describe('hasUninlinedLocalRef：检测 html 引用了未产出的本地文件（会 404）', () => {
+  it('引用了且产出过 → false（自包含成立）', () => {
+    const html = '<html><head><link href="style.css" rel="stylesheet"></head><body><script src="app.js"></script></body></html>';
+    const files = [
+      { path: 'src/index.html', content: html },
+      { path: 'src/style.css', content: 'body{}' },
+      { path: 'src/app.js', content: 'x' },
+    ];
+    expect(hasUninlinedLocalRef(html, files)).toBe(false);
+  });
+
+  it('引用了但未产出 → true（触发自包含不成立，走组装兜底）', () => {
+    const html = '<html><body><script src="main.js"></script></body></html>';
+    const files = [{ path: 'src/index.html', content: html }]; // main.js 声明了但没产出
+    expect(hasUninlinedLocalRef(html, files)).toBe(true);
+  });
+
+  it('link 引用未产出的 css → true', () => {
+    const html = '<html><head><link rel="stylesheet" href="missing.css"></head><body></body></html>';
+    const files = [{ path: 'src/index.html', content: html }];
+    expect(hasUninlinedLocalRef(html, files)).toBe(true);
+  });
+
+  it('外部 CDN 引用被忽略（http(s):// 开头不算本地）', () => {
+    const html = '<html><head><script src="https://cdn.jsdelivr.net/npm/x"></script><link href="https://cdn.example.com/y.css" rel="stylesheet"></head><body></body></html>';
+    const files = [{ path: 'src/index.html', content: html }];
+    expect(hasUninlinedLocalRef(html, files)).toBe(false);
+  });
+
+  it('协议相对 // 开头的外部 URL 也被忽略', () => {
+    const html = '<html><head><script src="//cdn.example.com/x.js"></script></head><body></body></html>';
+    const files = [{ path: 'src/index.html', content: html }];
+    expect(hasUninlinedLocalRef(html, files)).toBe(false);
+  });
+
+  it('无引用 → false', () => {
+    const html = '<html><body><script>console.log(1)</script></body></html>';
+    const files = [{ path: 'src/index.html', content: html }];
+    expect(hasUninlinedLocalRef(html, files)).toBe(false);
   });
 });

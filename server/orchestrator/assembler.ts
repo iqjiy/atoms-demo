@@ -63,3 +63,45 @@ export function assembleHtml(files: ParsedFile[]): string | null {
 function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
+
+/**
+ * 检测 html 里 <script src> / <link href> 是否引用了「相对路径本地文件但在 files 里没对应内容」的项。
+ * 有则返回 true（引用了未产出文件 → 直接当自包含预览会 404，触发上层走组装兜底）。
+ * 外部 URL（http(s):// 或 // 开头，如 CDN）一律忽略，不算本地缺失。
+ */
+export function hasUninlinedLocalRef(html: string, files: ParsedFile[]): boolean {
+  if (!html) return false;
+  const produced = new Set(files.map((f) => baseNameOf(f.path).toLowerCase()));
+  // <script src="..."> 与 <link href="..."> 的引用值
+  const refRe = /<(?:script|link)\b[^>]*(?:src|href)=["']([^"']+)["']/gi;
+  let m: RegExpExecArray | null;
+  while ((m = refRe.exec(html)) !== null) {
+    const url = m[1].trim();
+    if (EXTERNAL_URL_RE.test(url)) continue; // 外部 URL 忽略
+    const base = baseNameOf(url).toLowerCase();
+    if (!produced.has(base)) return true;    // 本地引用但没产出 → 会 404
+  }
+  return false;
+}
+
+function baseNameOf(p: string): string {
+  return p.split('/').pop() ?? p;
+}
+
+/**
+ * 移除 html 中「引用了未产出文件」的本地 <script src> / <link href> 标签（避免预览 404 / 死按钮）。
+ * 外部 URL 与已产出的本地文件标签保持不动。用于组装兜底后清理悬空引用。
+ */
+export function stripUninlinedLocalRefs(html: string, files: ParsedFile[]): string {
+  if (!html) return html;
+  const produced = new Set(files.map((f) => baseNameOf(f.path).toLowerCase()));
+  return html.replace(
+    /<script\b[^>]*\bsrc=["']([^"']+)["'][^>]*>\s*<\/script>|<link\b[^>]*\bhref=["']([^"']+)["'][^>]*>/gi,
+    (tag, scriptSrc: string | undefined, linkHref: string | undefined) => {
+      const url = (scriptSrc ?? linkHref ?? '').trim();
+      if (EXTERNAL_URL_RE.test(url)) return tag; // 外部 URL 保留
+      const base = baseNameOf(url).toLowerCase();
+      return produced.has(base) ? tag : '';      // 未产出 → 删除标签
+    },
+  );
+}
